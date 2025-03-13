@@ -1,669 +1,414 @@
 """
-Scene Detection Module.
+Scene Detection Module with GPU Acceleration.
 
-This module provides GPU-accelerated scene detection capabilities using PySceneDetect
-with custom enhancements for improved performance.
+This module provides functions for detecting scene changes in videos,
+optimized for GPU acceleration when available.
 
 📌 Purpose: Detect scene boundaries in videos with GPU acceleration
-🔄 Latest Changes: Initial implementation with GPU optimization
-⚙️ Key Logic: Uses content-aware and threshold-based detection methods
+🔄 Latest Changes: Initial implementation with GPU support
+⚙️ Key Logic: Uses PySceneDetect with custom GPU-accelerated content detector
 📂 Expected File Path: src/video_processing/scene_detection.py
-🧠 Reasoning: Scene detection is compute-intensive and benefits greatly from GPU
-              acceleration, especially for content-aware algorithms
+🧠 Reasoning: Scene detection is computationally intensive and benefits from
+              GPU acceleration for histogram comparison and content analysis
 """
 
 import os
 import logging
 import tempfile
-from typing import List, Dict, Tuple, Optional, Union, Any
-from enum import Enum
-import concurrent.futures
-from pathlib import Path
+from typing import List, Optional, Tuple, Dict, Any, Union
 
 import cv2
 import numpy as np
 import torch
-from scenedetect import SceneManager, VideoManager
+from scenedetect import SceneManager, open_video
 from scenedetect.detectors import ContentDetector, ThresholdDetector
 from scenedetect.scene_detector import SceneDetector
 from scenedetect.stats_manager import StatsManager
+from scenedetect.frame_timecode import FrameTimecode
 
-from src.models.schema import Scene, Frame, AnalysisConfig, VideoMetadata
-from src.utils.gpu_utils import get_optimal_device, clear_gpu_memory
-from src.video_processing.loader import extract_video_metadata, create_video_capture, extract_frame, save_frame
+from src.models.schema import Scene, Frame, VideoMetadata
+from src.utils.gpu_utils import get_optimal_device, memory_stats, clear_gpu_memory
 
 logger = logging.getLogger(__name__)
 
 # Get the optimal device (GPU if available, otherwise CPU)
 DEVICE = get_optimal_device()
+USE_GPU = DEVICE.type != 'cpu'
 
-
-class DetectionMethod(str, Enum):
-    """Scene detection methods."""
-    
-    CONTENT = "content"
-    THRESHOLD = "threshold"
-    HYBRID = "hybrid"
-    CUSTOM = "custom"
-
-
-class GPUContentDetector:
-    """Custom content detector with GPU acceleration for frame comparison."""
-    
-    def __init__(self, threshold: float = 30.0, batch_size: int = 8, use_gpu: bool = True):
-        """
-        Initialize the GPU-accelerated content detector.
-        
-        Args:
-            threshold: Threshold for scene change detection
-            batch_size: Number of frames to process at once
-            use_gpu: Whether to use GPU acceleration
-        """
-        self.threshold = threshold
-        self.batch_size = batch_size
-        self.device = get_optimal_device() if use_gpu else torch.device('cpu')
-        self.prev_frame_hsv = None
-        self.diff_scaler = 1.0 / 255.0 * 100.0
-        
-        logger.info(f"Initialized GPU content detector (device: {self.device}, threshold: {threshold})")
-    
-    def process_frame(self, frame: np.ndarray) -> Tuple[float, Optional[np.ndarray]]:
-        """
-        Process a frame and compute content difference from previous frame.
-        
-        Args:
-            frame: Frame as numpy array
-            
-        Returns:
-            Tuple containing:
-            - Content difference score
-            - Visualization frame (if requested)
-        """
-        with torch.no_grad():
-            # Convert frame to HSV
-            frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-            
-            if self.prev_frame_hsv is None:
-                self.prev_frame_hsv = frame_hsv
-                return 0.0, None
-            
-            # Convert frames to tensors
-            curr_tensor = torch.from_numpy(frame_hsv).to(self.device).float()
-            prev_tensor = torch.from_numpy(self.prev_frame_hsv).to(self.device).float()
-            
-            # Calculate mean absolute difference for each channel
-            abs_diff = torch.abs(curr_tensor - prev_tensor)
-            mean_diff = torch.mean(abs_diff, dim=(0, 1))
-            
-            # Weight the channels (higher weight to hue and saturation)
-            weighted_diff = mean_diff[0] * 0.5 + mean_diff[1] * 0.3 + mean_diff[2] * 0.2
-            content_val = weighted_diff.item() * self.diff_scaler
-            
-            # Update previous frame
-            self.prev_frame_hsv = frame_hsv
-            
-            return content_val, None
-    
-    def is_scene_change(self, score: float) -> bool:
-        """
-        Determine if a content difference score indicates a scene change.
-        
-        Args:
-            score: Content difference score
-            
-        Returns:
-            bool: True if score indicates a scene change
-        """
-        return score >= self.threshold
-    
-    def reset(self):
-        """Reset the detector state."""
-        self.prev_frame_hsv = None
-        # Clear GPU memory if needed
-        if self.device.type == 'cuda':
-            torch.cuda.empty_cache()
-
-
-class GPUAcceleratedSceneDetector:
-    """Scene detector with GPU acceleration capabilities."""
-    
-    def __init__(
-        self,
-        detection_method: Union[str, DetectionMethod] = DetectionMethod.CONTENT,
-        threshold: float = 30.0,
-        min_scene_length: float = 1.0,
-        batch_size: int = 8,
-        use_gpu: bool = True
-    ):
-        """
-        Initialize the scene detector.
-        
-        Args:
-            detection_method: Method for scene detection
-            threshold: Threshold for scene change detection
-            min_scene_length: Minimum scene length in seconds
-            batch_size: Number of frames to process at once
-            use_gpu: Whether to use GPU acceleration
-        """
-        self.detection_method = detection_method if isinstance(detection_method, DetectionMethod) else DetectionMethod(detection_method)
-        self.threshold = threshold
-        self.min_scene_length = min_scene_length
-        self.batch_size = batch_size
-        self.use_gpu = use_gpu and DEVICE.type in ['cuda', 'mps']
-        
-        logger.info(f"Initialized scene detector (method: {self.detection_method}, threshold: {threshold}, GPU: {self.use_gpu})")
-    
-    def detect_scenes(
-        self, 
-        video_path: str, 
-        stats_file: Optional[str] = None,
-        extract_frames: bool = False,
-        output_dir: Optional[str] = None
-    ) -> List[Scene]:
-        """
-        Detect scenes in a video.
-        
-        Args:
-            video_path: Path to the video file
-            stats_file: Path to save detection statistics
-            extract_frames: Whether to extract key frames for scenes
-            output_dir: Directory to save extracted frames
-            
-        Returns:
-            List of Scene objects
-        """
-        # Extract video metadata
-        video_metadata = extract_video_metadata(video_path)
-        if video_metadata is None:
-            logger.error(f"Failed to extract metadata from video: {video_path}")
-            return []
-        
-        # Create output directory if needed
-        if extract_frames and output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-        
-        # Choose detection method
-        if self.detection_method == DetectionMethod.CONTENT:
-            scenes = self._detect_content_aware(video_path, video_metadata, stats_file)
-        elif self.detection_method == DetectionMethod.THRESHOLD:
-            scenes = self._detect_threshold(video_path, video_metadata, stats_file)
-        elif self.detection_method == DetectionMethod.HYBRID:
-            scenes = self._detect_hybrid(video_path, video_metadata, stats_file)
-        elif self.detection_method == DetectionMethod.CUSTOM:
-            scenes = self._detect_custom_gpu(video_path, video_metadata)
-        else:
-            logger.error(f"Unknown detection method: {self.detection_method}")
-            return []
-        
-        # Extract key frames if requested
-        if extract_frames and scenes and output_dir:
-            self._extract_scene_frames(video_path, scenes, output_dir)
-        
-        return scenes
-    
-    def _detect_content_aware(
-        self, 
-        video_path: str, 
-        video_metadata: VideoMetadata,
-        stats_file: Optional[str] = None
-    ) -> List[Scene]:
-        """
-        Detect scenes using PySceneDetect's content-aware detector.
-        
-        Args:
-            video_path: Path to the video file
-            video_metadata: Video metadata
-            stats_file: Path to save detection statistics
-            
-        Returns:
-            List of Scene objects
-        """
-        logger.info(f"Using content-aware scene detection on: {video_path}")
-        
-        # Create video manager and stats manager
-        video_manager = VideoManager([video_path])
-        stats_manager = StatsManager()
-        
-        # Add stats file if provided
-        if stats_file:
-            stats_manager.save_to_csv(stats_file)
-        
-        # Create scene manager
-        scene_manager = SceneManager(stats_manager)
-        
-        # Add content detector
-        scene_manager.add_detector(ContentDetector(threshold=self.threshold))
-        
-        # Start video manager and perform detection
-        video_manager.set_downscale_factor()
-        video_manager.start()
-        scene_manager.detect_scenes(frame_source=video_manager)
-        
-        # Get scene list
-        scene_list = scene_manager.get_scene_list()
-        video_manager.release()
-        
-        # Convert to our Scene model
-        scenes = []
-        for i, (start_time, end_time) in enumerate(scene_list):
-            start_time_secs = start_time.get_seconds()
-            end_time_secs = end_time.get_seconds()
-            
-            # Skip scenes that are too short
-            if end_time_secs - start_time_secs < self.min_scene_length:
-                continue
-            
-            scene = Scene(
-                id=i + 1,  # 1-based IDs
-                start_time=start_time_secs,
-                end_time=end_time_secs,
-                key_frames=[]
-            )
-            scenes.append(scene)
-        
-        logger.info(f"Detected {len(scenes)} scenes")
-        return scenes
-    
-    def _detect_threshold(
-        self, 
-        video_path: str, 
-        video_metadata: VideoMetadata,
-        stats_file: Optional[str] = None
-    ) -> List[Scene]:
-        """
-        Detect scenes using PySceneDetect's threshold detector.
-        
-        Args:
-            video_path: Path to the video file
-            video_metadata: Video metadata
-            stats_file: Path to save detection statistics
-            
-        Returns:
-            List of Scene objects
-        """
-        logger.info(f"Using threshold-based scene detection on: {video_path}")
-        
-        # Create video manager and stats manager
-        video_manager = VideoManager([video_path])
-        stats_manager = StatsManager()
-        
-        # Add stats file if provided
-        if stats_file:
-            stats_manager.save_to_csv(stats_file)
-        
-        # Create scene manager
-        scene_manager = SceneManager(stats_manager)
-        
-        # Add threshold detector
-        scene_manager.add_detector(ThresholdDetector(threshold=self.threshold, min_percent=0.95))
-        
-        # Start video manager and perform detection
-        video_manager.set_downscale_factor()
-        video_manager.start()
-        scene_manager.detect_scenes(frame_source=video_manager)
-        
-        # Get scene list
-        scene_list = scene_manager.get_scene_list()
-        video_manager.release()
-        
-        # Convert to our Scene model
-        scenes = []
-        for i, (start_time, end_time) in enumerate(scene_list):
-            start_time_secs = start_time.get_seconds()
-            end_time_secs = end_time.get_seconds()
-            
-            # Skip scenes that are too short
-            if end_time_secs - start_time_secs < self.min_scene_length:
-                continue
-            
-            scene = Scene(
-                id=i + 1,  # 1-based IDs
-                start_time=start_time_secs,
-                end_time=end_time_secs,
-                key_frames=[]
-            )
-            scenes.append(scene)
-        
-        logger.info(f"Detected {len(scenes)} scenes")
-        return scenes
-    
-    def _detect_hybrid(
-        self, 
-        video_path: str, 
-        video_metadata: VideoMetadata,
-        stats_file: Optional[str] = None
-    ) -> List[Scene]:
-        """
-        Detect scenes using both content and threshold detectors.
-        
-        Args:
-            video_path: Path to the video file
-            video_metadata: Video metadata
-            stats_file: Path to save detection statistics
-            
-        Returns:
-            List of Scene objects
-        """
-        logger.info(f"Using hybrid scene detection on: {video_path}")
-        
-        # Get scenes from both methods
-        content_scenes = self._detect_content_aware(video_path, video_metadata, stats_file)
-        
-        # Temporarily change threshold for threshold detection
-        original_threshold = self.threshold
-        self.threshold = original_threshold * 1.5  # Higher threshold for more conservative cuts
-        threshold_scenes = self._detect_threshold(video_path, video_metadata, None)
-        self.threshold = original_threshold  # Restore original threshold
-        
-        # Merge scenes from both methods
-        all_boundaries = set()
-        
-        # Add boundaries from content detector
-        for scene in content_scenes:
-            all_boundaries.add(scene.start_time)
-            all_boundaries.add(scene.end_time)
-        
-        # Add boundaries from threshold detector
-        for scene in threshold_scenes:
-            all_boundaries.add(scene.start_time)
-            all_boundaries.add(scene.end_time)
-        
-        # Convert to sorted list and create scenes
-        boundaries = sorted(list(all_boundaries))
-        
-        scenes = []
-        for i in range(len(boundaries) - 1):
-            start_time = boundaries[i]
-            end_time = boundaries[i + 1]
-            
-            # Skip scenes that are too short
-            if end_time - start_time < self.min_scene_length:
-                continue
-            
-            scene = Scene(
-                id=i + 1,  # 1-based IDs
-                start_time=start_time,
-                end_time=end_time,
-                key_frames=[]
-            )
-            scenes.append(scene)
-        
-        logger.info(f"Detected {len(scenes)} scenes using hybrid approach")
-        return scenes
-    
-    def _detect_custom_gpu(
-        self, 
-        video_path: str, 
-        video_metadata: VideoMetadata
-    ) -> List[Scene]:
-        """
-        Detect scenes using custom GPU-accelerated implementation.
-        
-        Args:
-            video_path: Path to the video file
-            video_metadata: Video metadata
-            
-        Returns:
-            List of Scene objects
-        """
-        logger.info(f"Using custom GPU-accelerated scene detection on: {video_path}")
-        
-        # Create video capture
-        cap = create_video_capture(video_path)
-        if cap is None:
-            logger.error(f"Failed to open video: {video_path}")
-            return []
-        
-        # Get video properties
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        duration = frame_count / fps if fps > 0 else 0
-        
-        # Create detector
-        detector = GPUContentDetector(threshold=self.threshold, use_gpu=self.use_gpu)
-        
-        # Process frames
-        frame_idx = 0
-        scene_boundaries = [0.0]  # Start with the beginning of the video
-        
-        try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                
-                # Process frame
-                score, _ = detector.process_frame(frame)
-                
-                # Check for scene change
-                if frame_idx > 0 and detector.is_scene_change(score):
-                    time_secs = frame_idx / fps
-                    logger.debug(f"Scene change detected at {time_secs:.2f}s (frame {frame_idx}, score: {score:.2f})")
-                    scene_boundaries.append(time_secs)
-                
-                frame_idx += 1
-                
-                # Print progress
-                if frame_idx % 100 == 0:
-                    progress = frame_idx / frame_count * 100 if frame_count > 0 else 0
-                    logger.debug(f"Processing: {progress:.1f}% ({frame_idx}/{frame_count})")
-        
-        finally:
-            # Release resources
-            cap.release()
-            detector.reset()
-            if self.use_gpu:
-                clear_gpu_memory()
-        
-        # Add the end of the video as the final boundary
-        scene_boundaries.append(duration)
-        
-        # Create scenes
-        scenes = []
-        for i in range(len(scene_boundaries) - 1):
-            start_time = scene_boundaries[i]
-            end_time = scene_boundaries[i + 1]
-            
-            # Skip scenes that are too short
-            if end_time - start_time < self.min_scene_length:
-                continue
-            
-            scene = Scene(
-                id=i + 1,  # 1-based IDs
-                start_time=start_time,
-                end_time=end_time,
-                key_frames=[]
-            )
-            scenes.append(scene)
-        
-        logger.info(f"Detected {len(scenes)} scenes with custom GPU method")
-        return scenes
-    
-    def _extract_scene_frames(
-        self, 
-        video_path: str, 
-        scenes: List[Scene], 
-        output_dir: str,
-        frame_extraction_method: str = "representative"
-    ) -> None:
-        """
-        Extract key frames for each scene.
-        
-        Args:
-            video_path: Path to the video file
-            scenes: List of Scene objects
-            output_dir: Directory to save extracted frames
-            frame_extraction_method: Method for key frame extraction
-        """
-        logger.info(f"Extracting key frames for {len(scenes)} scenes")
-        
-        # Create output directory
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Create video capture
-        cap = create_video_capture(video_path)
-        if cap is None:
-            logger.error(f"Failed to open video for frame extraction: {video_path}")
-            return
-        
-        try:
-            # Get video properties
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            
-            for scene in scenes:
-                # Determine frame extraction strategy
-                if frame_extraction_method == "first":
-                    # Extract first frame of scene
-                    timestamps = [scene.start_time]
-                elif frame_extraction_method == "middle":
-                    # Extract middle frame of scene
-                    timestamps = [(scene.start_time + scene.end_time) / 2]
-                elif frame_extraction_method == "representative":
-                    # Extract multiple frames from the scene
-                    scene_duration = scene.end_time - scene.start_time
-                    frames_to_extract = max(1, min(3, int(scene_duration)))
-                    
-                    if frames_to_extract == 1:
-                        timestamps = [(scene.start_time + scene.end_time) / 2]
-                    else:
-                        # Evenly spaced frames
-                        step = scene_duration / (frames_to_extract + 1)
-                        timestamps = [scene.start_time + step * (i + 1) for i in range(frames_to_extract)]
-                else:
-                    logger.error(f"Unknown frame extraction method: {frame_extraction_method}")
-                    timestamps = [scene.start_time]
-                
-                # Extract frames
-                scene_frames = []
-                for i, timestamp in enumerate(timestamps):
-                    frame = extract_frame(cap, timestamp)
-                    if frame is not None:
-                        # Save frame
-                        frame_path = os.path.join(
-                            output_dir, 
-                            f"scene_{scene.id:04d}_frame_{i:02d}_{timestamp:.2f}s.jpg"
-                        )
-                        success = save_frame(frame, frame_path)
-                        
-                        if success:
-                            # Add to scene
-                            scene_frames.append(Frame(
-                                timestamp=timestamp,
-                                file_path=frame_path
-                            ))
-                            logger.debug(f"Saved frame: {frame_path}")
-                        else:
-                            logger.error(f"Failed to save frame: {frame_path}")
-                
-                # Update scene with extracted frames
-                scene.key_frames = scene_frames
-        
-        finally:
-            # Release resources
-            cap.release()
-            if self.use_gpu:
-                clear_gpu_memory()
-        
-        logger.info(f"Extracted key frames for {len(scenes)} scenes")
-
-
-def detect_scenes_batch(
-    video_paths: List[str],
-    output_dir: str,
-    detection_method: str = "content",
-    threshold: float = 30.0,
-    min_scene_length: float = 1.0,
-    extract_frames: bool = True,
-    use_gpu: bool = True,
-    max_workers: int = 1
-) -> Dict[str, List[Scene]]:
+class GPUContentDetector(ContentDetector):
     """
-    Detect scenes in multiple videos in parallel.
+    GPU-accelerated content detector for scene detection.
+    
+    This extends the standard ContentDetector from PySceneDetect to use
+    GPU acceleration for histogram calculation and comparison when available.
+    """
+    
+    def __init__(self, threshold: float = 30.0, min_scene_len: int = 15,
+                 weights: Optional[List[float]] = None, luma_only: bool = False,
+                 kernel_size: Optional[Tuple[int, int]] = None):
+        """
+        Initialize GPU-accelerated content detector.
+        
+        Args:
+            threshold: Threshold for scene cut detection (higher values = less sensitive)
+            min_scene_len: Minimum scene length in frames
+            weights: Weights for the HSV channels (default: [0.5, 0.3, 0.2])
+            luma_only: Whether to use only luma channel (Y) for comparison
+            kernel_size: Size of Gaussian kernel for frame preprocessing
+        """
+        super().__init__(threshold, min_scene_len)
+        self.weights = weights if weights is not None else [0.5, 0.3, 0.2]
+        self.luma_only = luma_only
+        self.kernel_size = kernel_size
+        self.use_gpu = USE_GPU
+        
+        if self.use_gpu:
+            logger.info(f"Using GPU ({DEVICE.type}) for content detection")
+            # Convert weights to tensor on GPU
+            self.weights_tensor = torch.tensor(self.weights, device=DEVICE)
+        else:
+            logger.info("Using CPU for content detection")
+    
+    def _calculate_frame_score(self, frame_img: np.ndarray, 
+                              frame_num: int) -> float:
+        """
+        Calculate frame score using GPU acceleration if available.
+        
+        Args:
+            frame_img: Frame image as numpy array
+            frame_num: Frame number
+            
+        Returns:
+            float: Frame score
+        """
+        # Convert frame to HSV color space
+        if self.luma_only:
+            # Use only luma channel (Y) from YUV
+            frame_hsv = cv2.cvtColor(frame_img, cv2.COLOR_BGR2YUV)[:, :, 0]
+        else:
+            # Use full HSV
+            frame_hsv = cv2.cvtColor(frame_img, cv2.COLOR_BGR2HSV)
+        
+        # Apply Gaussian blur if kernel size is specified
+        if self.kernel_size is not None:
+            frame_hsv = cv2.GaussianBlur(frame_hsv, self.kernel_size, 0)
+        
+        if self.use_gpu:
+            # Move frame to GPU and calculate histogram
+            if self.luma_only:
+                # Single channel histogram
+                frame_tensor = torch.from_numpy(frame_hsv).to(DEVICE)
+                hist = torch.histc(frame_tensor.float(), bins=256, min=0, max=255)
+                hist = hist / hist.sum()  # Normalize
+            else:
+                # Multi-channel histogram
+                frame_tensor = torch.from_numpy(frame_hsv).to(DEVICE)
+                h_hist = torch.histc(frame_tensor[:, :, 0].float(), bins=256, min=0, max=255)
+                s_hist = torch.histc(frame_tensor[:, :, 1].float(), bins=256, min=0, max=255)
+                v_hist = torch.histc(frame_tensor[:, :, 2].float(), bins=256, min=0, max=255)
+                
+                # Normalize histograms
+                h_hist = h_hist / h_hist.sum()
+                s_hist = s_hist / s_hist.sum()
+                v_hist = v_hist / v_hist.sum()
+                
+                # Store histograms for next frame comparison
+                if frame_num == 0:
+                    self.last_hsv = (h_hist, s_hist, v_hist)
+                    return 0.0
+                
+                # Calculate weighted difference between current and last frame
+                h_diff = torch.sum(torch.abs(h_hist - self.last_hsv[0]))
+                s_diff = torch.sum(torch.abs(s_hist - self.last_hsv[1]))
+                v_diff = torch.sum(torch.abs(v_hist - self.last_hsv[2]))
+                
+                # Apply weights
+                score = (h_diff * self.weights_tensor[0] + 
+                         s_diff * self.weights_tensor[1] + 
+                         v_diff * self.weights_tensor[2])
+                
+                # Update last frame histograms
+                self.last_hsv = (h_hist, s_hist, v_hist)
+                
+                return score.item() * 100.0  # Scale to match ContentDetector
+        
+        # Fall back to CPU implementation if GPU is not available
+        return super()._calculate_frame_score(frame_img, frame_num)
+
+
+def detect_scenes(video_path: str, 
+                 threshold: float = 30.0,
+                 min_scene_len: float = 1.0,
+                 method: str = 'content',
+                 luma_only: bool = False,
+                 stats_file: Optional[str] = None) -> List[Scene]:
+    """
+    Detect scenes in a video using GPU acceleration when available.
     
     Args:
-        video_paths: List of paths to video files
-        output_dir: Directory to save output
-        detection_method: Method for scene detection
-        threshold: Threshold for scene change detection
-        min_scene_length: Minimum scene length in seconds
-        extract_frames: Whether to extract key frames
-        use_gpu: Whether to use GPU acceleration
-        max_workers: Maximum number of workers for parallel processing
+        video_path: Path to the video file
+        threshold: Threshold for scene cut detection (higher values = less sensitive)
+        min_scene_len: Minimum scene length in seconds
+        method: Detection method ('content', 'threshold', 'hybrid')
+        luma_only: Whether to use only luma channel for comparison
+        stats_file: Path to save detection statistics
         
     Returns:
-        Dictionary mapping video paths to lists of Scene objects
+        List[Scene]: List of detected scenes
     """
-    logger.info(f"Detecting scenes in {len(video_paths)} videos")
+    logger.info(f"Detecting scenes in video: {video_path}")
+    logger.info(f"Method: {method}, Threshold: {threshold}, Min Scene Length: {min_scene_len}s")
     
-    # Disable GPU parallelism if max_workers > 1 (to avoid OOM)
-    parallel_use_gpu = use_gpu and max_workers == 1
+    # Open video and get basic properties
+    video = open_video(video_path)
+    fps = video.frame_rate
+    duration = video.duration
+    frame_count = video.frame_count
     
-    # Process videos
-    results = {}
+    # Convert min_scene_len from seconds to frames
+    min_scene_len_frames = int(min_scene_len * fps)
     
-    if max_workers > 1:
-        # Process videos in parallel
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {}
-            
-            for video_path in video_paths:
-                # Create output directory for this video
-                video_name = Path(video_path).stem
-                video_output_dir = os.path.join(output_dir, video_name)
-                os.makedirs(video_output_dir, exist_ok=True)
-                
-                # Create detector for this video
-                detector = GPUAcceleratedSceneDetector(
-                    detection_method=detection_method,
-                    threshold=threshold,
-                    min_scene_length=min_scene_length,
-                    use_gpu=parallel_use_gpu
-                )
-                
-                # Submit task
-                futures[executor.submit(
-                    detector.detect_scenes,
-                    video_path,
-                    None,
-                    extract_frames,
-                    video_output_dir if extract_frames else None
-                )] = video_path
-            
-            # Collect results
-            for future in concurrent.futures.as_completed(futures):
-                video_path = futures[future]
-                try:
-                    scenes = future.result()
-                    results[video_path] = scenes
-                except Exception as e:
-                    logger.error(f"Error detecting scenes in {video_path}: {str(e)}")
-                    results[video_path] = []
+    # Create stats manager
+    stats_manager = StatsManager()
+    
+    # Create scene manager
+    scene_manager = SceneManager(stats_manager)
+    
+    # Add appropriate detector based on method
+    if method == 'content':
+        # Use GPU-accelerated content detector if available
+        detector = GPUContentDetector(threshold=threshold, 
+                                     min_scene_len=min_scene_len_frames,
+                                     luma_only=luma_only)
+        scene_manager.add_detector(detector)
+    elif method == 'threshold':
+        detector = ThresholdDetector(threshold=threshold, 
+                                    min_scene_len=min_scene_len_frames)
+        scene_manager.add_detector(detector)
+    elif method == 'hybrid':
+        # Use both content and threshold detectors
+        content_detector = GPUContentDetector(threshold=threshold,
+                                            min_scene_len=min_scene_len_frames,
+                                            luma_only=luma_only)
+        threshold_detector = ThresholdDetector(threshold=threshold * 0.7,  # Lower threshold
+                                             min_scene_len=min_scene_len_frames)
+        scene_manager.add_detector(content_detector)
+        scene_manager.add_detector(threshold_detector)
     else:
-        # Process videos sequentially
-        detector = GPUAcceleratedSceneDetector(
-            detection_method=detection_method,
-            threshold=threshold,
-            min_scene_length=min_scene_length,
-            use_gpu=use_gpu
-        )
-        
-        for video_path in video_paths:
-            # Create output directory for this video
-            video_name = Path(video_path).stem
-            video_output_dir = os.path.join(output_dir, video_name)
-            os.makedirs(video_output_dir, exist_ok=True)
-            
-            try:
-                scenes = detector.detect_scenes(
-                    video_path,
-                    None,
-                    extract_frames,
-                    video_output_dir if extract_frames else None
-                )
-                results[video_path] = scenes
-            except Exception as e:
-                logger.error(f"Error detecting scenes in {video_path}: {str(e)}")
-                results[video_path] = []
+        raise ValueError(f"Unknown detection method: {method}")
     
-    logger.info(f"Completed scene detection for {len(results)} videos")
-    return results
+    # Detect scenes
+    logger.info(f"Processing {frame_count} frames...")
+    
+    # Use a progress callback to track detection progress
+    def progress_callback(current_frame: int, total_frames: int):
+        if current_frame % 500 == 0 or current_frame == total_frames - 1:
+            percent = 100.0 * current_frame / total_frames
+            logger.info(f"Scene detection progress: {percent:.1f}% ({current_frame}/{total_frames})")
+            
+            # Log GPU memory usage if available
+            if USE_GPU:
+                mem_stats = memory_stats()
+                logger.debug(f"GPU Memory: {mem_stats['allocated_gb']:.2f}GB allocated, "
+                            f"{mem_stats['reserved_gb']:.2f}GB reserved")
+    
+    # Detect scenes
+    scene_manager.detect_scenes(video, callback=progress_callback)
+    
+    # Get scene list
+    scene_list = scene_manager.get_scene_list()
+    
+    # Save stats if requested
+    if stats_file:
+        stats_manager.save_to_csv(stats_file)
+    
+    # Convert scene list to our Scene model
+    scenes = []
+    for i, (start_time, end_time) in enumerate(scene_list):
+        start_seconds = start_time.get_seconds()
+        end_seconds = end_time.get_seconds()
+        
+        scene = Scene(
+            id=i,
+            start_time=start_seconds,
+            end_time=end_seconds,
+            key_frames=[],  # Will be populated later
+            transcript_segments=[],  # Will be populated later
+            audio_events=[],  # Will be populated later
+            tags=[],  # Will be populated later
+        )
+        scenes.append(scene)
+    
+    logger.info(f"Detected {len(scenes)} scenes")
+    
+    # Clean up GPU memory if used
+    if USE_GPU:
+        clear_gpu_memory()
+    
+    return scenes
+
+
+def extract_keyframes(video_path: str, 
+                     scenes: List[Scene],
+                     strategy: str = 'representative',
+                     max_frames_per_scene: int = 3,
+                     output_dir: Optional[str] = None) -> List[Scene]:
+    """
+    Extract key frames from each scene.
+    
+    Args:
+        video_path: Path to the video file
+        scenes: List of scenes
+        strategy: Strategy for key frame extraction ('first', 'middle', 'representative', 'uniform')
+        max_frames_per_scene: Maximum number of frames to extract per scene
+        output_dir: Directory to save extracted frames
+        
+    Returns:
+        List[Scene]: Updated list of scenes with key frames
+    """
+    logger.info(f"Extracting key frames using strategy: {strategy}")
+    
+    # Open video
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        logger.error(f"Failed to open video: {video_path}")
+        return scenes
+    
+    # Get video properties
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
+    # Create output directory if specified
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    
+    # Process each scene
+    for i, scene in enumerate(scenes):
+        logger.info(f"Processing scene {i+1}/{len(scenes)}")
+        
+        # Calculate frame numbers for this scene
+        start_frame = int(scene.start_time * fps)
+        end_frame = int(scene.end_time * fps)
+        scene_frames = end_frame - start_frame
+        
+        # Skip if scene is too short
+        if scene_frames <= 0:
+            logger.warning(f"Scene {i} has no frames, skipping")
+            continue
+        
+        # Determine which frames to extract based on strategy
+        frames_to_extract = []
+        
+        if strategy == 'first':
+            # Extract first frame
+            frames_to_extract = [start_frame]
+        
+        elif strategy == 'middle':
+            # Extract middle frame
+            middle_frame = start_frame + scene_frames // 2
+            frames_to_extract = [middle_frame]
+        
+        elif strategy == 'uniform':
+            # Extract frames uniformly distributed across the scene
+            if scene_frames <= max_frames_per_scene:
+                # If scene is short, extract all frames
+                frames_to_extract = list(range(start_frame, end_frame + 1))
+            else:
+                # Extract frames uniformly
+                step = scene_frames // max_frames_per_scene
+                frames_to_extract = [start_frame + i * step for i in range(max_frames_per_scene)]
+        
+        elif strategy == 'representative':
+            # TODO: Implement more sophisticated representative frame selection
+            # For now, use uniform sampling as a placeholder
+            if scene_frames <= max_frames_per_scene:
+                frames_to_extract = list(range(start_frame, end_frame + 1))
+            else:
+                step = scene_frames // max_frames_per_scene
+                frames_to_extract = [start_frame + i * step for i in range(max_frames_per_scene)]
+        
+        else:
+            logger.error(f"Unknown key frame extraction strategy: {strategy}")
+            return scenes
+        
+        # Extract the selected frames
+        key_frames = []
+        for frame_num in frames_to_extract:
+            # Set position to the frame
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+            
+            # Read the frame
+            ret, frame = cap.read()
+            if not ret:
+                logger.warning(f"Failed to read frame {frame_num}")
+                continue
+            
+            # Calculate timestamp
+            timestamp = frame_num / fps
+            
+            # Save frame if output directory is specified
+            frame_path = None
+            if output_dir:
+                frame_path = os.path.join(output_dir, f"scene_{i:04d}_frame_{len(key_frames):04d}.jpg")
+                cv2.imwrite(frame_path, frame)
+            
+            # Create Frame object
+            key_frame = Frame(
+                timestamp=timestamp,
+                file_path=frame_path,
+                faces=[],  # Will be populated later
+                tags=[],  # Will be populated later
+            )
+            
+            key_frames.append(key_frame)
+        
+        # Update scene with key frames
+        scene.key_frames = key_frames
+    
+    # Release video capture
+    cap.release()
+    
+    logger.info(f"Extracted {sum(len(scene.key_frames) for scene in scenes)} key frames")
+    
+    return scenes
+
+
+def batch_process_frames(frames: List[np.ndarray], 
+                        batch_size: int = 16) -> List[np.ndarray]:
+    """
+    Process frames in batches for GPU efficiency.
+    
+    Args:
+        frames: List of frames as numpy arrays
+        batch_size: Batch size for processing
+        
+    Returns:
+        List[np.ndarray]: Processed frames
+    """
+    # This is a placeholder for batch processing logic
+    # In a real implementation, this would apply some GPU-accelerated
+    # processing to the frames in batches
+    
+    processed_frames = []
+    
+    for i in range(0, len(frames), batch_size):
+        batch = frames[i:i+batch_size]
+        
+        # Convert batch to tensor
+        if USE_GPU:
+            # Move batch to GPU
+            batch_tensor = torch.stack([torch.from_numpy(frame).to(DEVICE) for frame in batch])
+            
+            # Apply processing (placeholder)
+            # In a real implementation, this would apply some model or processing
+            processed_batch = batch_tensor
+            
+            # Move back to CPU and convert to numpy
+            processed_batch = processed_batch.cpu().numpy()
+        else:
+            # CPU processing (placeholder)
+            processed_batch = batch
+        
+        processed_frames.extend(processed_batch)
+    
+    return processed_frames
