@@ -1,85 +1,55 @@
-# Core Dependencies
-torch>=2.0.0  # Deep learning framework
-torchvision>=0.15.0  # Computer vision utilities
-numpy>=1.23.0  # Numerical computing
-opencv-python>=4.7.0  # Computer vision operations
-scenedetect>=0.6.1  # Scene detection
-openai-whisper>=20230314  # Speech-to-text
-transformers>=4.28.0  # NLP models
-datasets>=2.10.0  # Dataset utilities
-deepface>=0.0.79  # Facial analysis
-librosa>=0.10.0  # Audio processing
-pyaudioanalysis>=0.3.14  # Audio feature extraction
-scipy>=1.10.0  # Scientific computing
-matplotlib>=3.7.0  # Visualization
-pandas>=2.0.0  # Data manipulation
-tqdm>=4.65.0  # Progress bars
-pydantic>=2.0.0  # Data validation
-sqlalchemy>=2.0.0  # SQL ORM
+# Purpose: Minimal requirements for GPU tests using PyTorch.
+# Latest Changes: Updated to use flexible versioning without pinning specific versions.
+# Key Logic: Only install packages necessary to verify GPU functionality.
+# Expected File Path: /project_root/requirements.txt
+# Reasoning: Using flexible versioning to avoid conflicts with system-installed packages.
 
-# GPU Acceleration
-nvidia-cuda-runtime-cu12>=12.1.0  # NVIDIA CUDA Runtime (for CUDA 12.x)
-nvidia-cuda-nvrtc-cu12>=12.1.0  # NVIDIA CUDA NVRTC 
-nvidia-cudnn-cu12>=8.9.2  # NVIDIA cuDNN
-einops>=0.6.1  # Einstein-like operations for tensor manipulation
-flash-attn>=2.3.0  # Efficient attention mechanism
-triton>=2.0.0  # GPU programming language
-nvitop>=1.1.0  # Monitoring NVIDIA GPUs
+# Note: To install the CUDA-enabled builds, use the command:
+#       pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu118
 
-# Video Processing
-ffmpeg-python>=0.2.0  # FFmpeg Python bindings
-moviepy>=1.0.3  # Video editing
-imageio>=2.27.0  # Image I/O
-av>=10.0.0  # PyAV for audio/video handling
-decord>=0.6.0  # Efficient video loading library with GPU acceleration
+# Core dependencies with flexible versioning
+torch
+torchvision
+numpy>=1.23.0
+pandas>=1.5.0
+matplotlib>=3.5.0
+scipy>=1.10.0
+scikit-learn>=1.2.0
 
-# Machine Learning
-scikit-learn>=1.2.0  # Machine learning utilities
-sentence-transformers>=2.2.2  # Sentence embeddings
-faiss-cpu>=1.7.0  # Vector similarity search (CPU version)
-faiss-gpu>=1.7.0  # Vector similarity search (GPU version)
-timm>=0.9.2  # PyTorch Image Models
-albumentations>=1.3.0  # Image augmentation
-kornia>=0.6.9  # Differentiable computer vision library
+# Additional dependencies from your working project
+qdrant-client
+openai-clip
+streamlit
+rawpy
+exifread
+transformers
+pillow
+accelerate
+bitsandbytes
 
-# Deep Learning Models
-open_clip_torch>=2.20.0  # OpenAI CLIP
-bitsandbytes>=0.39.0  # Quantization utilities
-accelerate>=0.19.0  # Hugging Face accelerator
-diffusers>=0.16.0  # Diffusion models
+# Core video processing
+opencv-python>=4.5.0
+ffmpeg-python>=0.2.0
+moviepy>=1.0.3
 
-# Memory Management & Optimization
-pytorch-lightning>=2.0.0  # PyTorch Lightning
-torch-optimizer>=0.3.0  # Additional optimizers
-torch-tb-profiler>=0.4.1  # PyTorch Profiler with TensorBoard
-opt_einsum>=3.3.0  # Optimized einsum
-psutil>=5.9.5  # Process and system utilities
+# Transcription
+openai-whisper>=20230314
+# whisperx is optional and can be installed separately if needed
 
-# Parallelism
-ray>=2.3.0  # Distributed computing
-joblib>=1.2.0  # Parallel processing
-concurrent-log-handler>=0.9.20  # Thread-safe logging
+# Computer vision and embeddings
+torch>=2.0.0
+torchvision>=0.15.0
+Pillow>=9.0.0
+ftfy>=6.1.1
+regex>=2022.1.18
+transformers>=4.23.0
+git+https://github.com/openai/CLIP.git
 
-# UI Options (Desktop)
-PyQt5>=5.15.9  # Desktop UI framework (option 1)
-# tkinter  # Built-in UI framework (option 2)
+# Vector database
+# qdrant-client>=1.1.1 (optional, can be installed separately)
 
-# UI Options (Web)
-fastapi>=0.95.0  # Web API framework
-uvicorn>=0.22.0  # ASGI server
-jinja2>=3.1.2  # Templating
-aiofiles>=23.1.0  # Async file operations
-python-multipart>=0.0.6  # Form data handling
-
-# Storage
-SQLAlchemy>=2.0.0  # SQL ORM
-alembic>=1.10.0  # Database migrations
-chromadb>=0.4.0  # Vector database
-
-# Testing and Development
-pytest>=7.3.1  # Testing framework
-pytest-cov>=4.1.0  # Test coverage
-black>=23.3.0  # Code formatting
-isort>=5.12.0  # Import sorting
-flake8>=6.0.0  # Linting
-mypy>=1.2.0  # Type checking
+# Utilities
+tqdm>=4.65.0
+numpy>=1.23.0
+pandas>=1.5.0
+matplotlib>=3.6.0

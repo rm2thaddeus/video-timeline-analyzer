@@ -5,7 +5,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.10
+  - python=3.9
   - pip>=23.0.0
   # Core ML
   - pytorch>=2.0.0

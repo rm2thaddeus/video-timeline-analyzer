@@ -18,6 +18,7 @@ TRANSCRIPTS_DIR = ROOT_DIR / "transcripts"
 FRAMES_DIR = ROOT_DIR / "frames"
 EMBEDDINGS_DIR = ROOT_DIR / "embeddings"
 LOGS_DIR = ROOT_DIR / "logs"
+OUTPUT_DIR = ROOT_DIR / "output"  # Added output directory for final results
 
 # GPU configuration
 USE_CUDA = True  # Set to False to force CPU

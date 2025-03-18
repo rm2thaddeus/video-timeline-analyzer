@@ -1,0 +1,2 @@
+video_id,frame_number,timestamp,scene_id,frame_path,embedding_path,has_embedding,embedding_dims,scene_start_frame,scene_end_frame,scene_start_time,scene_end_time,video_duration,video_width,video_height,video_fps,video_total_frames
+videotest,7760,310.4,0,C:\Users\aitor\Video_Timeline\test_pipeline\frames\videotest_scene000_frame07760.jpg,C:\Users\aitor\Video_Timeline\test_pipeline\embeddings\videotest_scene000_frame07760_embedding.npy,True,512,0,15520,0.0,11.347822141877451,798.371701,640,360,25.0,19958

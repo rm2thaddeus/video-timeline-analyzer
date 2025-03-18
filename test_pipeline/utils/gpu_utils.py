@@ -147,16 +147,23 @@ def get_optimal_batch_size(model_name: str) -> int:
         # Generic conservative estimate
         return max(1, min(8, int(free_memory_gb / 0.5)))
 
-def setup_device() -> Tuple[torch.device, Optional[Dict]]:
+def setup_device(force_cpu: bool = False) -> Tuple[torch.device, bool]:
     """
     Set up the optimal device for processing.
     
+    Args:
+        force_cpu: Whether to force CPU usage even if GPU is available
+        
     Returns:
-        Tuple of (device, device_properties)
+        Tuple of (device, is_cuda_available)
     """
+    if force_cpu:
+        logger.warning("Forcing CPU usage as requested")
+        return torch.device("cpu"), False
+        
     gpu_info = detect_gpu()
     
-    if gpu_info["detected"]:
+    if gpu_info["detected"] and not force_cpu:
         device_str = gpu_info["optimal_device"]
         device = torch.device(device_str)
         
@@ -167,11 +174,11 @@ def setup_device() -> Tuple[torch.device, Optional[Dict]]:
                 "memory": get_memory_info()
             }
             logger.info(f"Using GPU: {properties['name']}")
-            return device, properties
+            return device, True
         elif device_str == "mps":
             properties = {"name": "Apple Silicon MPS"}
             logger.info("Using Apple Silicon GPU via MPS")
-            return device, properties
+            return device, True
     
     logger.warning("Using CPU for computation")
-    return torch.device("cpu"), None 
+    return torch.device("cpu"), False 

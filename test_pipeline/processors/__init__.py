@@ -1,21 +1,23 @@
 """
-📌 Purpose: Initialize the processors package
-🔄 Latest Changes: Initial creation
-⚙️ Key Logic: Make processors directory a proper Python package
+📌 Purpose: Export processor modules for the video processing pipeline
+🔄 Latest Changes: Added MetadataManager export
+⚙️ Key Logic: Import and re-export processor classes for easier imports
 📂 Expected File Path: test_pipeline/processors/__init__.py
-🧠 Reasoning: Proper Python package structure for better imports
+🧠 Reasoning: Simplify imports for pipeline components
 """
 
 # This file makes 'processors' a Python package.
 
-from .metadata_extractor import extract_metadata
+from .frame_processor import FrameProcessor
 from .scene_detector import SceneDetector
 from .audio_processor import AudioProcessor
-from .frame_processor import FrameProcessor
+from .metadata_extractor import extract_metadata
+from .metadata_dataframe import MetadataManager
 
 __all__ = [
-    'extract_metadata',
+    'FrameProcessor',
     'SceneDetector',
     'AudioProcessor',
-    'FrameProcessor'
+    'extract_metadata',
+    'MetadataManager'
 ] 

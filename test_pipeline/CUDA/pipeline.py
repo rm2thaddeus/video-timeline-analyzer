@@ -21,12 +21,19 @@ import torch.multiprocessing as mp
 from datetime import datetime
 from contextlib import nullcontext
 import time
+from typing import Dict, Any, Optional
 
 # Import pipeline components with fallback for module location
 try:
     from processors.metadata_extractor import extract_metadata
 except ModuleNotFoundError:
     from video_processing.metadata_extractor import extract_metadata
+
+# Import our metadata dataframe manager
+try:
+    from processors.metadata_dataframe import MetadataManager
+except ModuleNotFoundError:
+    from video_processing.metadata_dataframe import MetadataManager
 
 # Use our optimized scene detector
 from CUDA.scene_detector import SceneDetector
@@ -40,7 +47,12 @@ except ModuleNotFoundError:
     from video_processing.frame_processor import FrameProcessor
 
 from utils.gpu_utils import setup_device
-import cuda_config as config
+
+# Import config with correct relative path
+try:
+    from CUDA import cuda_config as config
+except ModuleNotFoundError:
+    from . import cuda_config as config
 
 # Setup logging with console output
 logging.basicConfig(
@@ -48,13 +60,13 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(config.LOGS_DIR / f"cuda_pipeline_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"),
-        logging.StreamHandler()
+        logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger("video_pipeline_cuda")
 
 # Ensure all logs go to console as well
-console_handler = logging.StreamHandler()
+console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setLevel(logging.INFO)
 console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 console_handler.setFormatter(console_formatter)
@@ -64,6 +76,9 @@ for logger_name in ["video_pipeline_cuda", "scene_detector_cuda"]:
     log = logging.getLogger(logger_name)
     log.addHandler(console_handler)
     log.setLevel(logging.INFO)
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 def _adapt_scenes_for_frame_processor(scenes):
     """
@@ -100,14 +115,17 @@ def _adapt_scenes_for_frame_processor(scenes):
 
 def ensure_directories():
     """Create all necessary directories for the pipeline."""
+    ROOT_DIR = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
     directories = [
-        config.METADATA_DIR,
-        config.SCENES_DIR,
-        config.AUDIO_CHUNKS_DIR,
-        config.TRANSCRIPTS_DIR,
-        config.FRAMES_DIR,
-        config.EMBEDDINGS_DIR,
-        config.LOGS_DIR
+        getattr(config, 'METADATA_DIR', ROOT_DIR / "metadata"),
+        getattr(config, 'SCENES_DIR', ROOT_DIR / "scenes"),
+        getattr(config, 'AUDIO_CHUNKS_DIR', ROOT_DIR / "audio_chunks"),
+        getattr(config, 'TRANSCRIPTS_DIR', ROOT_DIR / "transcripts"),
+        getattr(config, 'FRAMES_DIR', ROOT_DIR / "frames"),
+        getattr(config, 'EMBEDDINGS_DIR', ROOT_DIR / "embeddings"),
+        getattr(config, 'LOGS_DIR', ROOT_DIR / "logs"),
+        getattr(config, 'OUTPUT_DIR', ROOT_DIR / "output")
     ]
     
     for directory in directories:
@@ -254,404 +272,231 @@ def _process_audio_direct(video_path, video_id, model_name="tiny"):
     
     return audio_result
 
-def process_video(video_path, output_dir=None):
+def process_video(
+    video_path: str,
+    output_dir: Optional[str] = None,
+    frames_per_scene: int = 3,
+    frame_batch_size: int = 8,
+    whisper_model: str = "small",
+    clip_model: str = "ViT-B/32",
+    skip_existing: bool = False,
+    force_cpu: bool = False,
+    max_frame_dimension: int = 720,
+    verbose: bool = False,
+    gpu_memory_fraction: float = 0.8,
+    optimize_memory: bool = True,
+    use_mixed_precision: bool = True,
+    **kwargs
+) -> Dict[str, Any]:
     """
-    Process a video using CUDA-accelerated pipeline.
+    Process a video file with the pipeline.
     
     Args:
-        video_path: Path to video file
-        output_dir: Output directory for results (optional)
+        video_path: Path to the video file
+        output_dir: Directory to save pipeline outputs (if None, a default is used)
+        frames_per_scene: Number of frames to extract per scene
+        frame_batch_size: Batch size for frame processing
+        whisper_model: Whisper model size for transcription (tiny, base, small, medium, large)
+        clip_model: CLIP model for frame embeddings (ViT-B/32, ViT-B/16, etc.)
+        skip_existing: Skip processing if output files already exist
+        force_cpu: Force using CPU even if GPU is available
+        max_frame_dimension: Maximum dimension for extracting frames
+        verbose: Enable verbose logging
+        gpu_memory_fraction: Fraction of GPU memory to use (0.0-1.0)
+        optimize_memory: Use memory-efficient processing algorithms
+        use_mixed_precision: Use mixed precision (FP16) for faster processing
+        **kwargs: Additional arguments passed to components
         
     Returns:
         Dictionary with processing results
     """
-    # Create output directories if they don't exist
-    os.makedirs(config.METADATA_DIR, exist_ok=True)
-    os.makedirs(config.SCENES_DIR, exist_ok=True)
-    os.makedirs(config.AUDIO_CHUNKS_DIR, exist_ok=True)
-    os.makedirs(config.TRANSCRIPTS_DIR, exist_ok=True)
-    os.makedirs(config.FRAMES_DIR, exist_ok=True)
-    os.makedirs(config.EMBEDDINGS_DIR, exist_ok=True)
-    os.makedirs(config.LOGS_DIR, exist_ok=True)
+    # Start performance tracking
+    start_time = time.time()
+    performance_metrics = {
+        "start_time": datetime.now().isoformat(),
+        "video_path": video_path,
+    }
     
-    # Setup CUDA device
-    device, device_props = setup_device()
-    total_mem = 0
+    # Setup device
+    device, is_cuda_available = setup_device(force_cpu)
+    logger.info(f"Using device: {device} (CUDA available: {is_cuda_available})")
+    
     if device.type == "cuda":
-        total_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        # Apply GPU memory fraction
-        torch.cuda.set_per_process_memory_fraction(config.GPU_MEMORY_FRACTION, 0)
+        setup_cuda_optimizations(device)
     
+    # Ensure directories exist
+    ensure_directories()
+    
+    # Default output directory if not provided
+    if output_dir is None:
+        output_dir = config.OUTPUT_DIR
+    else:
+        output_dir = Path(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+    
+    # Get video file details
     video_path = Path(video_path)
-    video_id = video_path.stem
     
     if not video_path.exists():
         raise FileNotFoundError(f"Video file not found: {video_path}")
     
-    logger.info(f"[START] Starting CUDA video processing pipeline for {video_path}")
+    # Generate a unique identifier for this video
+    video_id = video_path.stem
+    logger.info(f"Processing video: {video_path} (ID: {video_id})")
     
-    # Setup device for GPU processing with CUDA
-    if device.type == "cuda":
-        logger.info(f"[CUDA] Using CUDA GPU: {torch.cuda.get_device_name(device)}")
-        # Apply CUDA optimizations
-        setup_cuda_optimizations(device)
-        
-        # Log GPU memory before processing
-        allocated_mem = torch.cuda.memory_allocated(0) / (1024**3)
-        free_mem = total_mem - allocated_mem
-        logger.info(f"[MEMORY] GPU Memory - Total: {total_mem:.2f}GB, Allocated: {allocated_mem:.2f}GB, Free: {free_mem:.2f}GB")
-    else:
-        logger.warning(f"[WARN] CUDA not available, using device: {device.type}")
+    # Extract metadata for the video
+    metadata = extract_metadata(str(video_path), str(config.METADATA_DIR))
+    performance_metrics["metadata_extraction_time"] = time.time() - start_time
+    logger.info(f"Video duration: {metadata.get('duration_seconds', 'Unknown')} seconds")
     
-    # Set up mixed precision if enabled
-    if config.USE_MIXED_PRECISION and device.type == "cuda":
-        try:
-            # Use the newer recommended approach if available
-            amp_context = torch.amp.autocast(device_type='cuda')
-            logger.info("[CONFIG] Mixed precision (FP16) enabled")
-        except Exception:
-            # Fall back to the older approach
-            amp_context = torch.cuda.amp.autocast()
-            logger.info("[CONFIG] Mixed precision (legacy mode) enabled")
-    else:
-        amp_context = nullcontext()
-        if device.type == "cuda":
-            logger.info("[CONFIG] Mixed precision disabled")
+    # Create result dict
+    result = {
+        "video_id": video_id,
+        "metadata": metadata,
+        "scenes": None,
+        "frames": None,
+        "transcript": None,
+        "unified_dataframe": None
+    }
     
-    try:
-        # Step 1: Extract metadata (CPU-bound, no need for CUDA)
-        logger.info("[STEP 1] Extracting video metadata...")
-        metadata = extract_metadata(video_path, config.METADATA_DIR)
-        logger.info(f"[METADATA] Extracted - Duration: {metadata['duration_seconds']:.2f}s, Resolution: {metadata['width']}x{metadata['height']}")
+    # Detect scenes
+    scene_start_time = time.time()
+    scene_detector = SceneDetector(
+        device=device,
+        batch_size=int(config.SCENE_BATCH_SIZE),
+        checkpoint_interval=int(config.SCENE_CHECKPOINT_INTERVAL)
+    )
+    
+    # Detect scenes with progress
+    logger.info("Detecting scenes...")
+    scenes = scene_detector.detect_scenes(
+        str(video_path),
+        output_dir=str(config.SCENES_DIR)
+    )
+    
+    # Add performance metrics
+    scene_time = time.time() - scene_start_time
+    performance_metrics["scene_detection_time"] = scene_time
+    
+    # Store scene information
+    result["scenes"] = scenes
+    logger.info(f"Detected {len(scenes)} scenes in {scene_time:.2f} seconds")
+    
+    # Clean GPU memory before next step
+    clean_gpu_memory()
+    
+    # Extract and process audio with enhanced parallelism
+    audio_start_time = time.time()
+    
+    # Initialize the audio processor
+    audio_processor = AudioProcessorCUDA(
+        model_name=whisper_model,
+        device=device,
+        batch_size=kwargs.get("audio_batch_size", 4),
+        use_mixed_precision=use_mixed_precision,
+        gpu_memory_fraction=gpu_memory_fraction * 0.8,  # Reserve some memory for other tasks
+        num_workers=min(4, os.cpu_count() or 2)
+    )
+    
+    # Process audio
+    logger.info("Processing audio and transcribing...")
+    transcript_data = audio_processor.process_video_cuda(
+        str(video_path),
+        output_dir=str(config.TRANSCRIPTS_DIR),
+        chunk_duration=config.AUDIO_CHUNK_DURATION,
+        overlap=config.AUDIO_CHUNK_OVERLAP,
+        max_workers=min(kwargs.get("audio_batch_size", 4), config.MAX_PARALLEL_TASKS)
+    )
+    
+    # Add performance metrics
+    audio_time = time.time() - audio_start_time
+    performance_metrics["audio_processing_time"] = audio_time
+    
+    # Store transcript data
+    result["transcript"] = transcript_data
+    logger.info(f"Audio processed in {audio_time:.2f} seconds")
+    
+    # Clean GPU memory again
+    clean_gpu_memory()
+    
+    # Extract frames and generate embeddings
+    frames_start_time = time.time()
+    
+    # Adjust scene data format for frame processor
+    adapted_scenes = _adapt_scenes_for_frame_processor(scenes)
+    
+    # Initialize frame processor with CLIP model
+    frame_processor = FrameProcessor(
+        model_name=clip_model,
+        device=device,
+        memory_efficient=optimize_memory,
+        max_frames_in_memory=kwargs.get("max_frames_in_memory", 100)
+    )
+    
+    # Process frames
+    logger.info("Extracting and embedding frames...")
+    frame_results = frame_processor.process_video(
+        str(video_path),
+        adapted_scenes,
+        frames_dir=str(config.FRAMES_DIR),
+        embeddings_dir=str(config.EMBEDDINGS_DIR),
+        frames_per_scene=frames_per_scene,
+        max_dimension=max_frame_dimension
+    )
+    
+    # Add performance metrics
+    frames_time = time.time() - frames_start_time
+    performance_metrics["frame_processing_time"] = frames_time
+    
+    # Store frame results
+    result["frames"] = frame_results
+    logger.info(f"Processed {len(frame_results)} frames in {frames_time:.2f} seconds")
+    
+    # Clean GPU memory one more time
+    clean_gpu_memory()
+    
+    # Create unified metadata dataframe
+    metadata_start_time = time.time()
+    logger.info("Creating unified metadata dataframe...")
+    
+    # Initialize metadata manager
+    metadata_manager = MetadataManager()
+    
+    # Create dataframe from various data sources
+    unified_df = metadata_manager.create_dataframe(
+        video_id=video_id,
+        frames_data=frame_results,
+        transcript_data=transcript_data,
+        scene_data=scenes,
+        video_metadata=metadata
+    )
+    
+    # Add performance metrics
+    metadata_manager.add_performance_metrics(performance_metrics)
+    
+    # Save the dataframe (without embedding arrays to save space)
+    metadata_file_path = metadata_manager.save_dataframe(
+        output_dir=str(config.METADATA_DIR),
+        include_embeddings=False
+    )
+    
+    # Calculate metadata creation time
+    metadata_time = time.time() - metadata_start_time
+    performance_metrics["metadata_dataframe_time"] = metadata_time
+    logger.info(f"Created metadata dataframe with {len(unified_df)} entries in {metadata_time:.2f} seconds")
+    
+    # Store dataframe in result
+    result["unified_dataframe"] = unified_df
+    result["metadata_file_path"] = metadata_file_path
+    
+    # Final performance metrics
+    total_time = time.time() - start_time
+    performance_metrics["total_processing_time"] = total_time
+    result["performance_metrics"] = performance_metrics
+    
+    logger.info(f"Video processing completed in {total_time:.2f} seconds")
         
-        # Clean GPU memory between steps
-        clean_gpu_memory()
-        
-        # Step 2: Detect scenes with optimized batch processing
-        logger.info("[STEP 2] Detecting scenes with batch processing...")
-        logger.info(f"[CONFIG] Using threshold: {config.SCENE_THRESHOLD}, batch size: {config.SCENE_BATCH_SIZE}")
-        
-        scene_detector = SceneDetector(
-            threshold=config.SCENE_THRESHOLD,
-            device=device,
-            batch_size=config.SCENE_BATCH_SIZE,
-            checkpoint_interval=config.SCENE_CHECKPOINT_INTERVAL
-        )
-        
-        try:
-            logger.info(f"[SCENES] Processing video frames for scene detection...")
-            scenes = scene_detector.detect_scenes(video_path, config.SCENES_DIR)
-            logger.info(f"[SCENES] Scene detection completed - Found {len(scenes)} scenes")
-            
-            # Log some scene information
-            if scenes:
-                logger.info(f"[SCENES] First scene: {scenes[0]['start_time']:.2f}s to {scenes[0]['end_time']:.2f}s ({scenes[0]['duration_seconds']:.2f}s)")
-                if len(scenes) > 1:
-                    logger.info(f"[SCENES] Last scene: {scenes[-1]['start_time']:.2f}s to {scenes[-1]['end_time']:.2f}s ({scenes[-1]['duration_seconds']:.2f}s)")
-        except Exception as e:
-            logger.error(f"[ERROR] Error during scene detection: {e}")
-            logger.error(traceback.format_exc())
-            # Try to recover and continue with fallback scene detection
-            logger.info("[FALLBACK] Attempting fallback scene detection with more conservative settings...")
-            try:
-                # Try with more conservative settings
-                scene_detector = SceneDetector(
-                    threshold=config.SCENE_THRESHOLD * 1.5,  # Higher threshold = fewer scenes
-                    device=None,  # Force CPU
-                    batch_size=100,  # Smaller batches
-                    checkpoint_interval=500  # More frequent checkpoints
-                )
-                scenes = scene_detector.detect_scenes(video_path, config.SCENES_DIR)
-                logger.info(f"[FALLBACK] Scene detection completed - Found {len(scenes)} scenes")
-            except Exception as e2:
-                logger.error(f"[ERROR] Fallback scene detection also failed: {e2}")
-                # Create a single scene as last resort
-                duration = metadata['duration_seconds']
-                scenes = [{
-                    "id": 0,
-                    "start_frame": 0,
-                    "end_frame": int(metadata.get('fps', 25) * duration),
-                    "start_time": 0,
-                    "end_time": duration,
-                    "duration_frames": int(metadata.get('fps', 25) * duration),
-                    "duration_seconds": duration,
-                    "resolution": {
-                        "width": metadata['width'],
-                        "height": metadata['height']
-                    }
-                }]
-                logger.info("[FALLBACK] Using fallback single scene covering entire video")
-        
-        # Clean GPU memory between steps
-        clean_gpu_memory()
-        
-        # Adapt scenes to the format expected by frame_processor
-        scenes_adapted = _adapt_scenes_for_frame_processor(scenes)
-        
-        # Step 3 & 4: Process audio and extract frames in parallel if enabled
-        if config.PARALLEL_PROCESSING and device.type == "cuda":
-            logger.info("[PARALLEL] Running audio processing and frame extraction in parallel...")
-            
-            # Create processor instances
-            frame_processor = FrameProcessor(
-                model_name=config.CLIP_MODEL, 
-                device=device
-            )
-            
-            audio_result = None
-            frames = []
-            
-            # Log start of parallel processing
-            logger.info(f"[CONFIG] Parallel processing configuration:")
-            logger.info(f"  - Frame processor model: {config.CLIP_MODEL}")
-            logger.info(f"  - Audio processor model: {config.WHISPER_MODEL}")
-            
-            # Run tasks in parallel using ThreadPoolExecutor
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                logger.info("[PARALLEL] Submitting parallel tasks...")
-                
-                # Submit frame extraction task
-                logger.info("[FRAMES] Frame extraction task submitted")
-                frame_future = executor.submit(
-                    lambda: frame_processor.extract_frames(
-                        video_path, 
-                        scenes_adapted,
-                        output_dir=config.FRAMES_DIR,
-                        frames_per_scene=3,
-                        max_dimension=config.MAX_FRAME_DIMENSION
-                    )
-                )
-                
-                # Submit audio processing task
-                logger.info(f"[AUDIO] Processing audio for {video_id} with Whisper {config.WHISPER_MODEL} model")
-                logger.info("[AUDIO] Audio processing task submitted")
-                audio_future = executor.submit(
-                    lambda: _process_audio_direct(video_path, video_id, config.WHISPER_MODEL)
-                )
-                
-                # Wait for tasks to complete
-                logger.info("[PARALLEL] Waiting for tasks to complete...")
-                
-                # Get frame extraction results
-                try:
-                    frames = frame_future.result()
-                    logger.info(f"[FRAMES] Frame extraction completed - Extracted {len(frames)} frames")
-                    
-                    # Generate embeddings for the extracted frames
-                    logger.info(f"[FRAMES] Generating embeddings for {len(frames)} frames...")
-                    frames_with_embeddings = frame_processor.embed_frames(
-                        frames,
-                        output_dir=config.EMBEDDINGS_DIR
-                    )
-                    frames = frames_with_embeddings
-                    logger.info(f"[FRAMES] Frame embedding completed")
-                except Exception as e:
-                    logger.error(f"[ERROR] Error during frame extraction: {e}")
-                    logger.error(traceback.format_exc())
-                    frames = []
-                
-                # Get audio processing results
-                try:
-                    audio_result = audio_future.result()
-                    logger.info(f"[AUDIO] Audio processing completed in {audio_result['processing_time_seconds']:.2f} seconds")
-                except Exception as e:
-                    logger.error(f"[ERROR] Error during audio processing: {e}")
-                    logger.error(traceback.format_exc())
-                    audio_result = {
-                        "video_id": video_id,
-                        "srt_path": "",
-                        "json_path": "",
-                        "processing_time_seconds": 0
-                    }
-            
-            if device.type == "cuda":
-                torch.cuda.synchronize()  # Ensure parallel GPU operations are complete
-                logger.info("[CUDA] Synchronizing CUDA operations...")
-                clean_gpu_memory()  # Clear cache to free up memory
-            
-            logger.info(f"[PARALLEL] Parallel processing completed")
-        else:
-            # Sequential processing
-            frames = []
-            audio_result = None
-            
-            # Step 3: Process audio and transcribe
-            logger.info("[STEP 3] Processing audio and transcribing...")
-            try:
-                audio_result = _process_audio_direct(video_path, video_id, config.WHISPER_MODEL)
-                logger.info(f"[AUDIO] Audio processing completed in {audio_result['processing_time_seconds']:.2f} seconds")
-            except Exception as e:
-                logger.error(f"[ERROR] Error during audio processing: {e}")
-                logger.error(traceback.format_exc())
-                # Create minimal result structure
-                audio_result = {
-                    "video_id": video_id,
-                    "srt_path": "",
-                    "json_path": "",
-                    "processing_time_seconds": 0
-                }
-            
-            # Clean GPU memory between steps
-            clean_gpu_memory()
-            
-            # Step 4: Extract and embed frames
-            logger.info("[STEP 4] Extracting and embedding frames...")
-            try:
-                logger.info(f"[CONFIG] Using CLIP model: {config.CLIP_MODEL}")
-                frame_processor = FrameProcessor(
-                    model_name=config.CLIP_MODEL, 
-                    device=device
-                )
-                
-                logger.info(f"[FRAMES] Extracting frames from {len(scenes_adapted)} scenes...")
-                with amp_context:
-                    frames = frame_processor.extract_frames(
-                        video_path, 
-                        scenes_adapted,
-                        output_dir=config.FRAMES_DIR,
-                        frames_per_scene=3,
-                        max_dimension=config.MAX_FRAME_DIMENSION
-                    )
-                    
-                    # Generate embeddings for the extracted frames
-                    logger.info(f"[FRAMES] Generating embeddings for {len(frames)} frames...")
-                    frames_with_embeddings = frame_processor.embed_frames(
-                        frames,
-                        output_dir=config.EMBEDDINGS_DIR
-                    )
-                    frames = frames_with_embeddings
-                    
-                if device.type == "cuda":
-                    torch.cuda.synchronize()  # Ensure GPU operations for frame extraction are complete
-                    clean_gpu_memory()  # Clear cache to free up memory
-                
-                logger.info(f"[FRAMES] Frame extraction and embedding completed - Extracted {len(frames)} frames")
-            except Exception as e:
-                logger.error(f"[ERROR] Error during frame extraction: {e}")
-                logger.error(traceback.format_exc())
-        
-        # Log GPU memory after processing
-        if device.type == "cuda":
-            clean_gpu_memory()  # Clear cache to free up memory
-            allocated_mem = torch.cuda.memory_allocated(0) / (1024**3)
-            free_mem = total_mem - allocated_mem
-            logger.info(f"[MEMORY] GPU Memory after processing - Allocated: {allocated_mem:.2f}GB, Free: {free_mem:.2f}GB")
-        
-        # Save results
-        result = {
-            "video_id": video_id,
-            "metadata": metadata,
-            "scenes": scenes,
-            "frames": frames or [],
-            "audio_processing": {
-                "srt_path": audio_result["srt_path"] if audio_result else "",
-                "json_path": audio_result["json_path"] if audio_result else "",
-                "processing_time_seconds": audio_result["processing_time_seconds"] if audio_result else 0
-            },
-            "processed_with_cuda": device.type == "cuda",
-            "cuda_device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A",
-            "cuda_optimizations": {
-                "mixed_precision": config.USE_MIXED_PRECISION,
-                "cudnn_benchmark": config.USE_CUDNN_BENCHMARK,
-                "pinned_memory": config.USE_PINNED_MEMORY,
-                "batch_size": config.GPU_BATCH_SIZE,
-                "parallel_processing": config.PARALLEL_PROCESSING,
-                "gpu_memory_fraction": config.GPU_MEMORY_FRACTION
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        # Save summary to disk
-        if output_dir is not None:
-            output_dir = Path(output_dir)
-            os.makedirs(output_dir, exist_ok=True)
-            
-            # Create a more detailed summary
-            summary_path = output_dir / f"{video_id}_summary.json"
-            with open(summary_path, "w") as f:
-                json.dump(result, f, indent=2)
-            logger.info(f"[OUTPUT] Summary saved to {summary_path}")
-            
-            # Create a Markdown summary file
-            md_summary_path = output_dir / f"{video_id}_PROCESSING_SUMMARY.md"
-            with open(md_summary_path, "w") as f:
-                f.write(f"# CUDA Video Processing Pipeline Results\n\n")
-                f.write(f"## Processing Summary for \"{Path(video_path).name}\"\n\n")
-                
-                f.write("We successfully processed the video using our optimized CUDA pipeline with the following results:\n\n")
-                
-                f.write("### Performance\n")
-                scene_time = scene_detector.stats.get("end_time", 0) - scene_detector.stats.get("start_time", 0)
-                audio_time = audio_result.get("processing_time_seconds", 0)
-                frame_time = 5  # Placeholder, actual timing info not available
-                total_time = scene_time + audio_time + frame_time
-                f.write(f"- Scene detection: Completed in ~{int(scene_time)} seconds\n")
-                f.write(f"- Audio transcription: Completed in ~{int(audio_time)} seconds\n")
-                f.write(f"- Frame extraction: Completed in ~{int(frame_time)} seconds\n")
-                f.write(f"- Total processing time: ~{int(total_time)} seconds\n")
-                f.write(f"- GPU Memory utilization: {allocated_mem:.2f}GB (out of {total_mem:.2f}GB available)\n\n")
-                
-                f.write("### Scene Detection\n")
-                f.write(f"- Detected {len(scenes)} main scenes\n")
-                f.write(f"- Used CUDA-accelerated content detection with batch processing\n")
-                f.write(f"- Threshold: {config.SCENE_THRESHOLD}\n")
-                f.write(f"- Batch size: {config.SCENE_BATCH_SIZE}\n\n")
-                
-                f.write("### Transcription\n")
-                f.write(f"- Generated complete SRT subtitle file\n")
-                f.write(f"- Used Whisper \"{config.WHISPER_MODEL}\" model\n")
-                f.write(f"- Processed full audio file without chunking for reliability\n\n")
-                
-                f.write("### Frame Extraction\n")
-                f.write(f"- Extracted {len(frames)} key frames from the video\n")
-                f.write(f"- Used CLIP model for frame analysis\n")
-                f.write(f"- Frames extracted at strategic points in the timeline\n\n")
-                
-                f.write("## Technical Details\n\n")
-                f.write(f"- CUDA Device: {result['cuda_device']}\n")
-                f.write(f"- Mixed Precision: {'Enabled' if result['cuda_optimizations']['mixed_precision'] else 'Disabled'}\n")
-                f.write(f"- Parallel Processing: {'Enabled' if result['cuda_optimizations']['parallel_processing'] else 'Disabled'}\n")
-                f.write(f"- Batch Size: {result['cuda_optimizations']['batch_size']}\n")
-                f.write(f"- Memory Fraction: {result['cuda_optimizations']['gpu_memory_fraction']}\n\n")
-                
-                f.write("## Usage\n\n")
-                f.write("To process videos with this pipeline:\n\n")
-                f.write("```bash\n")
-                f.write(f"python test_pipeline/CUDA/run_pipeline.py \"path/to/video.mp4\" --gpu_memory_fraction {config.GPU_MEMORY_FRACTION} --whisper_model {config.WHISPER_MODEL}\n")
-                f.write("```\n\n")
-                
-                f.write("Additional parameters can be found by running:\n\n")
-                f.write("```bash\n")
-                f.write("python test_pipeline/CUDA/run_pipeline.py --help\n")
-                f.write("```\n")
-                
-            logger.info(f"[OUTPUT] Markdown summary saved to {md_summary_path}")
-        
-        logger.info(f"[SUCCESS] Video processing completed successfully!")
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"[ERROR] Error in video processing pipeline: {e}")
-        logger.error(traceback.format_exc())
-        
-        # Try to return partial results if available
-        result = {
-            "video_id": video_id,
-            "metadata": metadata if 'metadata' in locals() else {},
-            "scenes": scenes if 'scenes' in locals() else [],
-            "frames": frames if 'frames' in locals() else [],
-            "audio_processing": {
-                "srt_path": audio_result["srt_path"] if 'audio_result' in locals() and audio_result else "",
-                "json_path": audio_result["json_path"] if 'audio_result' in locals() and audio_result else "",
-                "processing_time_seconds": audio_result["processing_time_seconds"] if 'audio_result' in locals() and audio_result else 0
-            },
-            "error": str(e),
-            "processed_with_cuda": device.type == "cuda" if 'device' in locals() else False,
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        return result
+    return result
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process a video with the CUDA pipeline")

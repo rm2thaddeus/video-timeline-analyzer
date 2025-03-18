@@ -1,0 +1,12 @@
+---
+description: remove unused scripts
+globs: 
+alwaysApply: false
+---
+
+# Your rule content
+
+- Always remove files that are not part of core logic
+- Once you provide a summary of what's been done, you should remove all unused files
+- Flag one timer scripts in the comments when they are created
+

@@ -1,0 +1,12 @@
+---
+description: Do not reinstall torch
+globs: 
+alwaysApply: false
+---
+        
+# Your rule content
+
+- Pytorch and all CUDA dependencies are installed in python path
+- Do not duplicate downloads
+
+T

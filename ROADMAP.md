@@ -7,8 +7,10 @@ This roadmap outlines the development path for the Video Timeline Analyzer proje
 - [x] Create GitHub repository
 - [x] Set up initial documentation (README, ROADMAP)
 - [ ] Establish project structure and architecture
-- [ ] Set up dev environment configuration (requirements.txt, environment.yml)
-- [ ] Implement GPU detection and utilization
+- [x] Set up dev environment configuration (requirements.txt, environment.yml) using the shared venv at "C:\WINDOWS\System32\pytorch-env"; ensure this designated environment is used consistently.
+- [x] Address dependency management between PyTorch and Python to ensure smooth GPU integration
+- [x] Implement GPU detection and utilization (diagnostic validated by test_gpu.py)
+- [x] Write initial unit tests for GPU utilities
 - [ ] Create unit testing framework
 - [ ] Implement CI/CD pipeline (GitHub Actions)
 
@@ -65,6 +67,7 @@ This roadmap outlines the development path for the Video Timeline Analyzer proje
 
 ## Phase 7: Integration & System Optimization (Weeks 12-13)
 
+- [ ] Integrate GPU diagnostic metrics (validated by test_gpu.py) into the video processing pipeline to dynamically optimize video processing tasks
 - [ ] Integrate all components into cohesive pipeline
 - [ ] Optimize for GPU performance
 - [ ] Implement parallel processing
