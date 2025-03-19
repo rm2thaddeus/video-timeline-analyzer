@@ -1,6 +1,6 @@
 """
 📌 Purpose: Main pipeline script for video processing with CUDA optimization
-🔄 Latest Changes: Enhanced memory management with batch processing and better error handling
+🔄 Latest Changes: Fixed audio processing imports and improved error handling
 ⚙️ Key Logic: Orchestrates the entire video processing workflow with CUDA acceleration
 📂 Expected File Path: test_pipeline/CUDA/pipeline.py
 🧠 Reasoning: Centralized entry point for the CUDA-accelerated video processing pipeline
@@ -18,10 +18,18 @@ import traceback
 from pathlib import Path
 import torch
 import torch.multiprocessing as mp
-from datetime import datetime
-from contextlib import nullcontext
+from datetime import datetime, timedelta
 import time
-from typing import Dict, Any, Optional
+import shutil
+from typing import Dict, Any, Optional, Union, List
+from tqdm import tqdm
+import subprocess
+import whisper
+import ffmpeg
+import numpy as np
+from PIL import Image
+import cv2
+from transformers import CLIPProcessor, CLIPModel, Blip2Processor, Blip2ForConditionalGeneration
 
 # Import pipeline components with fallback for module location
 try:
@@ -179,324 +187,277 @@ def setup_cuda_optimizations(device):
     else:
         logger.warning("[WARN] CUDA not available, optimizations not applied")
 
-def _process_audio_direct(video_path, video_id, model_name="tiny"):
+def copy_output_files(video_id: str, output_dir: str) -> None:
+    """Copy all generated files to the output directory.
+    
+    Args:
+        video_id: Video ID for file naming
+        output_dir: Output directory path
     """
-    Process audio directly without chunking to avoid tensor dimension issues.
+    # Create output directory structure
+    output_dir = Path(output_dir)
+    output_metadata_dir = output_dir / "metadata"
+    output_scenes_dir = output_dir / "scenes"
+    output_transcripts_dir = output_dir / "transcripts"
+    output_screenshots_dir = output_dir / "screenshots"
+    
+    # Create directories
+    for dir_path in [output_dir, output_metadata_dir, output_scenes_dir, output_transcripts_dir, output_screenshots_dir]:
+        os.makedirs(dir_path, exist_ok=True)
+    
+    # Copy metadata files
+    metadata_file = Path("test_pipeline/metadata") / f"{video_id}_metadata.json"
+    if metadata_file.exists():
+        shutil.copy2(metadata_file, output_metadata_dir / f"{video_id}_metadata.json")
+    
+    metadata_csv = Path("test_pipeline/metadata") / f"{video_id}_metadata.csv"
+    if metadata_csv.exists():
+        shutil.copy2(metadata_csv, output_metadata_dir / f"{video_id}_metadata.csv")
+    
+    # Copy scene files
+    scenes_file = Path("test_pipeline/scenes") / f"{video_id}_scenes.json"
+    if scenes_file.exists():
+        shutil.copy2(scenes_file, output_scenes_dir / f"{video_id}_scenes.json")
+    
+    # Copy screenshots
+    screenshots_dir = Path("test_pipeline/scenes/screenshots")
+    if screenshots_dir.exists():
+        for screenshot in screenshots_dir.glob("scene_*.jpg"):
+            shutil.copy2(screenshot, output_screenshots_dir / screenshot.name)
+    
+    # Copy transcripts
+    for ext in [".srt", ".json"]:
+        transcript_file = Path("test_pipeline/transcripts") / f"{video_id}{ext}"
+        if transcript_file.exists():
+            shutil.copy2(transcript_file, output_transcripts_dir / f"{video_id}{ext}")
+
+def _process_audio_direct(video_path: Union[str, Path], model_name: str = "small") -> None:
+    """Process audio directly with whisper model without chunking."""
+    video_id = Path(video_path).stem
+    audio_path = f"test_pipeline/audio_chunks/{video_id}.wav"
+    
+    # Extract audio using FFmpeg
+    logging.info("[AUDIO] Extracting audio with FFmpeg...")
+    subprocess.run([
+        'ffmpeg', '-y', '-i', str(video_path), 
+        '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1',
+        audio_path
+    ], capture_output=True)
+    logging.info(f"[AUDIO] Audio extracted to {audio_path}")
+    
+    try:
+        # Load model
+        logging.info(f"[AUDIO] Loading Whisper {model_name} model...")
+        model = whisper.load_model(model_name)  # Use the provided model_name
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = model.to(device)
+        logging.info(f"[AUDIO] Using {device} for processing")
+        
+        # Load audio
+        audio = whisper.load_audio(audio_path)
+        
+        # Transcribe with Whisper's built-in chunking
+        logging.info("[AUDIO] Transcribing audio...")
+        result = model.transcribe(
+            audio,
+            task="transcribe",
+            beam_size=5,  # Increased from 1 for better accuracy
+            best_of=5,    # Increased from 1 for better accuracy
+            temperature=0.2,  # Slight randomness for better results
+            fp16=torch.cuda.is_available()  # Use FP16 if GPU available for speed
+        )
+        
+        # Save results
+        os.makedirs("test_pipeline/transcripts", exist_ok=True)
+        
+        # Save as SRT
+        srt_path = f"test_pipeline/transcripts/{video_id}.srt"
+        with open(srt_path, 'w', encoding='utf-8') as f:
+            for i, segment in enumerate(result['segments'], 1):
+                start = timedelta(seconds=float(segment['start']))
+                end = timedelta(seconds=float(segment['end']))
+                f.write(f"{i}\n")
+                f.write(f"{str(start).replace('.', ',')} --> {str(end).replace('.', ',')}\n")
+                f.write(f"{segment['text'].strip()}\n\n")
+        
+        # Save as JSON
+        json_path = f"test_pipeline/transcripts/{video_id}.json"
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(result['segments'], f, ensure_ascii=False, indent=2)
+            
+        logging.info(f"[AUDIO] Transcription completed: {len(result['segments'])} segments saved")
+            
+    except Exception as e:
+        logging.error(f"[AUDIO] Error during transcription: {str(e)}")
+        traceback.print_exc()
+
+def _extract_scene_frames(video_path: Path, scene: dict) -> List[np.ndarray]:
+    """Extract start, middle and end frames from a scene.
     
     Args:
         video_path: Path to the video file
-        video_id: Video ID/name
-        model_name: Whisper model name
-        
+        scene: Scene dictionary containing start_frame and end_frame
+    
     Returns:
-        Dictionary with processing results
+        List of frames as numpy arrays
     """
-    # Initialize result
-    audio_result = {
-        "video_id": video_id,
-        "srt_path": "",
-        "json_path": "",
-        "processing_time_seconds": 0
-    }
+    cap = cv2.VideoCapture(str(video_path))
+    frames = []
+    frame_positions = [
+        scene["start_frame"],  # Start
+        scene["start_frame"] + (scene["end_frame"] - scene["start_frame"]) // 2,  # Middle
+        scene["end_frame"]  # End
+    ]
     
-    logger.info(f"[AUDIO] Processing audio for {video_id} with Whisper {model_name} model")
+    for frame_pos in frame_positions:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
+        ret, frame = cap.read()
+        if ret:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frames.append(frame)
     
-    # Extract audio first
-    audio_file = config.AUDIO_CHUNKS_DIR / f"{video_id}.wav"
+    cap.release()
+    return frames
+
+def _process_frames_with_models(frames: List[np.ndarray], video_id: str, scene_id: int) -> Dict:
+    """Process frames with CLIP and BLIP-2 models.
+    
+    Args:
+        frames: List of frames as numpy arrays
+        video_id: Video identifier
+        scene_id: Scene number
+    
+    Returns:
+        Dictionary containing embeddings and metadata
+    """
     try:
-        # Import subprocess here to avoid circular import
-        import subprocess
+        # Initialize models
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         
-        # Simple FFmpeg command to extract audio
-        command = [
-            "ffmpeg",
-            "-i", str(video_path),
-            "-vn",  # No video
-            "-acodec", "pcm_s16le",  # PCM 16-bit little-endian format
-            "-ar", "16000",  # 16 kHz sample rate (Whisper's expected rate)
-            "-ac", "1",  # Mono
-            "-y",  # Overwrite output file
-            str(audio_file)
-        ]
+        # CLIP setup
+        clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
+        clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
         
-        logger.info(f"[AUDIO] Extracting audio with FFmpeg...")
-        subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        logger.info(f"[AUDIO] Audio extracted to {audio_file}")
+        # BLIP-2 setup
+        blip_processor = Blip2Processor.from_pretrained("Salesforce/blip2-opt-2.7b")
+        blip_model = Blip2ForConditionalGeneration.from_pretrained(
+            "Salesforce/blip2-opt-2.7b", 
+            torch_dtype=torch.float16 if device == "cuda" else torch.float32
+        ).to(device)
         
-        # Create transcription using OpenAI whisper directly
-        import whisper
+        frame_data = []
+        frame_types = ["start", "middle", "end"]
         
-        start_time = time.time()
-        logger.info(f"[AUDIO] Loading Whisper {model_name} model...")
-        model = whisper.load_model(model_name, device="cpu")
-        
-        # Transcribe audio
-        logger.info(f"[AUDIO] Transcribing audio with Whisper {model_name} model...")
-        result = model.transcribe(str(audio_file))
-        
-        # Save SRT file
-        srt_file = config.TRANSCRIPTS_DIR / f"{video_id}.srt"
-        with open(srt_file, "w", encoding="utf-8") as f:
-            for i, segment in enumerate(result["segments"]):
-                # Format: index, timestamp, text
-                f.write(f"{i+1}\n")
-                start = segment["start"]
-                end = segment["end"]
-                # Format timestamp as HH:MM:SS,mmm
-                start_str = f"{int(start//3600):02d}:{int((start%3600)//60):02d}:{int(start%60):02d},{int((start%1)*1000):03d}"
-                end_str = f"{int(end//3600):02d}:{int((end%3600)//60):02d}:{int(end%60):02d},{int((end%1)*1000):03d}"
-                f.write(f"{start_str} --> {end_str}\n")
-                f.write(f"{segment['text']}\n\n")
-        
-        # Save JSON file
-        json_file = config.TRANSCRIPTS_DIR / f"{video_id}.json"
-        with open(json_file, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2)
-        
-        processing_time = time.time() - start_time
-        logger.info(f"[AUDIO] Transcription completed in {processing_time:.2f} seconds")
-        logger.info(f"[AUDIO] SRT file saved to {srt_file}")
-        logger.info(f"[AUDIO] JSON file saved to {json_file}")
-        
-        # Update audio result
-        audio_result = {
-            "video_id": video_id,
-            "srt_path": str(srt_file),
-            "json_path": str(json_file),
-            "processing_time_seconds": processing_time
+        # Process each frame
+        for frame, frame_type in zip(frames, frame_types):
+            # Save frame as image
+            frame_path = f"test_pipeline/frames/{video_id}_scene_{scene_id}_{frame_type}.jpg"
+            os.makedirs(os.path.dirname(frame_path), exist_ok=True)
+            Image.fromarray(frame).save(frame_path)
+            
+            # Get CLIP embeddings
+            clip_inputs = clip_processor(images=frame, return_tensors="pt").to(device)
+            clip_features = clip_model.get_image_features(**clip_inputs)
+            embeddings = clip_features.detach().cpu().numpy()
+            
+            # Get BLIP-2 caption
+            blip_inputs = blip_processor(Image.fromarray(frame), return_tensors="pt").to(device)
+            caption = blip_model.generate(**blip_inputs)
+            caption_text = blip_processor.decode(caption[0], skip_special_tokens=True)
+            
+            # Get detailed scene description using BLIP-2
+            prompt = "Describe this scene in detail, including any notable objects, actions, or emotions:"
+            inputs = blip_processor(Image.fromarray(frame), text=prompt, return_tensors="pt").to(device)
+            detailed_description = blip_model.generate(**inputs)
+            description_text = blip_processor.decode(detailed_description[0], skip_special_tokens=True)
+            
+            frame_data.append({
+                "frame_type": frame_type,
+                "frame_path": frame_path,
+                "embeddings": embeddings.tolist(),
+                "caption": caption_text,
+                "detailed_description": description_text
+            })
+            
+        return {
+            "scene_id": scene_id,
+            "frames": frame_data
         }
         
     except Exception as e:
-        logger.error(f"[ERROR] Error in direct audio processing: {e}")
-        logger.error(traceback.format_exc())
-    
-    return audio_result
+        logger.error(f"Error processing frames for scene {scene_id}: {str(e)}")
+        return None
 
-def process_video(
-    video_path: str,
-    output_dir: Optional[str] = None,
-    frames_per_scene: int = 3,
-    frame_batch_size: int = 8,
-    whisper_model: str = "small",
-    clip_model: str = "ViT-B/32",
-    skip_existing: bool = False,
-    force_cpu: bool = False,
-    max_frame_dimension: int = 720,
-    verbose: bool = False,
-    gpu_memory_fraction: float = 0.8,
-    optimize_memory: bool = True,
-    use_mixed_precision: bool = True,
-    **kwargs
-) -> Dict[str, Any]:
-    """
-    Process a video file with the pipeline.
+def process_video(video_path: Union[str, Path], output_dir: str, whisper_model: str = "small") -> None:
+    """Process a video file with the pipeline.
     
     Args:
-        video_path: Path to the video file
-        output_dir: Directory to save pipeline outputs (if None, a default is used)
-        frames_per_scene: Number of frames to extract per scene
-        frame_batch_size: Batch size for frame processing
-        whisper_model: Whisper model size for transcription (tiny, base, small, medium, large)
-        clip_model: CLIP model for frame embeddings (ViT-B/32, ViT-B/16, etc.)
-        skip_existing: Skip processing if output files already exist
-        force_cpu: Force using CPU even if GPU is available
-        max_frame_dimension: Maximum dimension for extracting frames
-        verbose: Enable verbose logging
-        gpu_memory_fraction: Fraction of GPU memory to use (0.0-1.0)
-        optimize_memory: Use memory-efficient processing algorithms
-        use_mixed_precision: Use mixed precision (FP16) for faster processing
-        **kwargs: Additional arguments passed to components
-        
-    Returns:
-        Dictionary with processing results
+        video_path: Path to the video file (string or Path object)
+        output_dir: Output directory for processed files
+        whisper_model: Whisper model name to use
     """
-    # Start performance tracking
     start_time = time.time()
-    performance_metrics = {
-        "start_time": datetime.now().isoformat(),
-        "video_path": video_path,
-    }
-    
-    # Setup device
-    device, is_cuda_available = setup_device(force_cpu)
-    logger.info(f"Using device: {device} (CUDA available: {is_cuda_available})")
-    
-    if device.type == "cuda":
-        setup_cuda_optimizations(device)
-    
-    # Ensure directories exist
-    ensure_directories()
-    
-    # Default output directory if not provided
-    if output_dir is None:
-        output_dir = config.OUTPUT_DIR
-    else:
-        output_dir = Path(output_dir)
-        os.makedirs(output_dir, exist_ok=True)
-    
-    # Get video file details
-    video_path = Path(video_path)
-    
-    if not video_path.exists():
-        raise FileNotFoundError(f"Video file not found: {video_path}")
-    
-    # Generate a unique identifier for this video
-    video_id = video_path.stem
-    logger.info(f"Processing video: {video_path} (ID: {video_id})")
-    
-    # Extract metadata for the video
-    metadata = extract_metadata(str(video_path), str(config.METADATA_DIR))
-    performance_metrics["metadata_extraction_time"] = time.time() - start_time
-    logger.info(f"Video duration: {metadata.get('duration_seconds', 'Unknown')} seconds")
-    
-    # Create result dict
-    result = {
-        "video_id": video_id,
-        "metadata": metadata,
-        "scenes": None,
-        "frames": None,
-        "transcript": None,
-        "unified_dataframe": None
-    }
-    
-    # Detect scenes
-    scene_start_time = time.time()
-    scene_detector = SceneDetector(
-        device=device,
-        batch_size=int(config.SCENE_BATCH_SIZE),
-        checkpoint_interval=int(config.SCENE_CHECKPOINT_INTERVAL)
-    )
-    
-    # Detect scenes with progress
-    logger.info("Detecting scenes...")
-    scenes = scene_detector.detect_scenes(
-        str(video_path),
-        output_dir=str(config.SCENES_DIR)
-    )
-    
-    # Add performance metrics
-    scene_time = time.time() - scene_start_time
-    performance_metrics["scene_detection_time"] = scene_time
-    
-    # Store scene information
-    result["scenes"] = scenes
-    logger.info(f"Detected {len(scenes)} scenes in {scene_time:.2f} seconds")
-    
-    # Clean GPU memory before next step
-    clean_gpu_memory()
-    
-    # Extract and process audio with enhanced parallelism
-    audio_start_time = time.time()
-    
-    # Initialize the audio processor
-    audio_processor = AudioProcessorCUDA(
-        model_name=whisper_model,
-        device=device,
-        batch_size=kwargs.get("audio_batch_size", 4),
-        use_mixed_precision=use_mixed_precision,
-        gpu_memory_fraction=gpu_memory_fraction * 0.8,  # Reserve some memory for other tasks
-        num_workers=min(4, os.cpu_count() or 2)
-    )
-    
-    # Process audio
-    logger.info("Processing audio and transcribing...")
-    transcript_data = audio_processor.process_video_cuda(
-        str(video_path),
-        output_dir=str(config.TRANSCRIPTS_DIR),
-        chunk_duration=config.AUDIO_CHUNK_DURATION,
-        overlap=config.AUDIO_CHUNK_OVERLAP,
-        max_workers=min(kwargs.get("audio_batch_size", 4), config.MAX_PARALLEL_TASKS)
-    )
-    
-    # Add performance metrics
-    audio_time = time.time() - audio_start_time
-    performance_metrics["audio_processing_time"] = audio_time
-    
-    # Store transcript data
-    result["transcript"] = transcript_data
-    logger.info(f"Audio processed in {audio_time:.2f} seconds")
-    
-    # Clean GPU memory again
-    clean_gpu_memory()
-    
-    # Extract frames and generate embeddings
-    frames_start_time = time.time()
-    
-    # Adjust scene data format for frame processor
-    adapted_scenes = _adapt_scenes_for_frame_processor(scenes)
-    
-    # Initialize frame processor with CLIP model
-    frame_processor = FrameProcessor(
-        model_name=clip_model,
-        device=device,
-        memory_efficient=optimize_memory,
-        max_frames_in_memory=kwargs.get("max_frames_in_memory", 100)
-    )
-    
-    # Process frames
-    logger.info("Extracting and embedding frames...")
-    frame_results = frame_processor.process_video(
-        str(video_path),
-        adapted_scenes,
-        frames_dir=str(config.FRAMES_DIR),
-        embeddings_dir=str(config.EMBEDDINGS_DIR),
-        frames_per_scene=frames_per_scene,
-        max_dimension=max_frame_dimension
-    )
-    
-    # Add performance metrics
-    frames_time = time.time() - frames_start_time
-    performance_metrics["frame_processing_time"] = frames_time
-    
-    # Store frame results
-    result["frames"] = frame_results
-    logger.info(f"Processed {len(frame_results)} frames in {frames_time:.2f} seconds")
-    
-    # Clean GPU memory one more time
-    clean_gpu_memory()
-    
-    # Create unified metadata dataframe
-    metadata_start_time = time.time()
-    logger.info("Creating unified metadata dataframe...")
-    
-    # Initialize metadata manager
-    metadata_manager = MetadataManager()
-    
-    # Create dataframe from various data sources
-    unified_df = metadata_manager.create_dataframe(
-        video_id=video_id,
-        frames_data=frame_results,
-        transcript_data=transcript_data,
-        scene_data=scenes,
-        video_metadata=metadata
-    )
-    
-    # Add performance metrics
-    metadata_manager.add_performance_metrics(performance_metrics)
-    
-    # Save the dataframe (without embedding arrays to save space)
-    metadata_file_path = metadata_manager.save_dataframe(
-        output_dir=str(config.METADATA_DIR),
-        include_embeddings=False
-    )
-    
-    # Calculate metadata creation time
-    metadata_time = time.time() - metadata_start_time
-    performance_metrics["metadata_dataframe_time"] = metadata_time
-    logger.info(f"Created metadata dataframe with {len(unified_df)} entries in {metadata_time:.2f} seconds")
-    
-    # Store dataframe in result
-    result["unified_dataframe"] = unified_df
-    result["metadata_file_path"] = metadata_file_path
-    
-    # Final performance metrics
-    total_time = time.time() - start_time
-    performance_metrics["total_processing_time"] = total_time
-    result["performance_metrics"] = performance_metrics
-    
-    logger.info(f"Video processing completed in {total_time:.2f} seconds")
+    try:
+        # Convert string path to Path object if needed
+        video_path = Path(video_path) if isinstance(video_path, str) else video_path
         
-    return result
+        # Get video ID from filename
+        video_id = video_path.stem
+        logger.info(f"Processing {video_path} (ID: {video_id})")
+        
+        # Extract metadata
+        metadata = extract_metadata(video_path)
+        
+        # Detect scenes
+        logger.info("Detecting scenes...")
+        scene_detector = SceneDetector()
+        start_scene_time = time.time()
+        scenes = scene_detector.detect_scenes(video_path)
+        scene_time = time.time() - start_scene_time
+        logger.info(f"Detected {len(scenes)} scenes in {scene_time:.2f} seconds")
+        
+        # Clean GPU memory after scene detection
+        clean_gpu_memory()
+        
+        # Process audio directly without chunking
+        _process_audio_direct(str(video_path), whisper_model)
+        
+        # Clean GPU memory after audio processing
+        clean_gpu_memory()
+        
+        # Process frames for each scene
+        logger.info("Processing frames with CLIP and BLIP-2...")
+        scene_data = []
+        for i, scene in enumerate(scenes):
+            frames = _extract_scene_frames(video_path, scene)
+            if frames:
+                scene_metadata = _process_frames_with_models(frames, video_id, i)
+                if scene_metadata:
+                    scene_data.append(scene_metadata)
+        
+        # Save scene data with embeddings and descriptions
+        scene_data_path = f"test_pipeline/frames/{video_id}_scene_data.json"
+        os.makedirs(os.path.dirname(scene_data_path), exist_ok=True)
+        with open(scene_data_path, 'w') as f:
+            json.dump(scene_data, f, indent=2)
+        
+        logger.info(f"Processed {len(scene_data)} scenes with CLIP and BLIP-2")
+        
+        # Clean GPU memory after frame processing
+        clean_gpu_memory()
+        
+        # Copy all generated files to output directory
+        logger.info(f"Copying generated files to output directory: {output_dir}")
+        copy_output_files(video_id, output_dir)
+        logger.info("All files copied to output directory successfully")
+        
+        # Log total processing time
+        end_time = time.time()
+        logger.info(f"Video processing completed in {end_time - start_time:.2f} seconds")
+        
+    except Exception as e:
+        logger.error(f"Pipeline failed: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process a video with the CUDA pipeline")
