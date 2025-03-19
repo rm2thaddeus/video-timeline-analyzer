@@ -1,6 +1,6 @@
 """
 📌 Purpose: Configuration settings for CUDA-accelerated video processing pipeline
-🔄 Latest Changes: Added memory optimization parameters and scene detection configurations
+🔄 Latest Changes: Simplified scene detection settings and removed unused batch parameters
 ⚙️ Key Logic: Central place for all configurable settings and hyperparameters
 📂 Expected File Path: test_pipeline/CUDA/cuda_config.py
 🧠 Reasoning: Centralize configuration in one file for easier adjustment and tuning
@@ -33,14 +33,10 @@ OPTIMIZE_MEMORY_USAGE = True  # Apply aggressive memory optimization techniques
 PARALLEL_PROCESSING = True  # Process audio extraction and frame extraction in parallel
 NUM_WORKERS = 2  # Number of workers for DataLoader
 
-# Batch processing 
-GPU_BATCH_SIZE = 4  # Batch size for GPU processing (lower if memory issues)
-
 # Scene detection
-SCENE_THRESHOLD = 27.0  # Threshold for scene change detection (higher = fewer scenes)
+SCENE_THRESHOLD = 0.35  # Threshold for scene change detection (0.0-1.0)
 SCENE_MIN_LENGTH = 15  # Minimum number of frames between scene changes
-SCENE_BATCH_SIZE = 128  # Number of frames to process in one batch
-SCENE_CHECKPOINT_INTERVAL = 5000  # Save progress every N frames
+BLACK_THRESHOLD = 0.05  # Threshold for black frame detection (0.0-1.0)
 
 # Audio processing
 WHISPER_MODEL = "tiny"  # "tiny", "base", "small", "medium", "large"
@@ -54,6 +50,3 @@ FRAMES_PER_SCENE = 3  # Number of frames to extract per scene
 
 # Parallelization settings
 MAX_PARALLEL_TASKS = 2  # Maximum number of parallel tasks
-
-# CUDA optimization settings
-PREFETCH_FACTOR = 2  # Prefetch factor for data loading

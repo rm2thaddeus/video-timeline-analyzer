@@ -339,4 +339,52 @@ class MetadataManager:
         if not dataframes:
             return None
             
-        return pd.concat(dataframes, ignore_index=True) 
+        return pd.concat(dataframes, ignore_index=True)
+
+    def process_metadata(
+        self,
+        video_id: str,
+        metadata: Dict[str, Any],
+        scenes: List[Dict[str, Any]],
+        audio_result: Optional[Dict[str, Any]] = None
+    ) -> pd.DataFrame:
+        """
+        Process metadata from various sources into a unified dataframe.
+        
+        Args:
+            video_id: Unique identifier for the video
+            metadata: Video metadata dictionary
+            scenes: List of scene dictionaries
+            audio_result: Audio processing results (optional)
+            
+        Returns:
+            pandas DataFrame with processed metadata
+        """
+        # Create base dataframe from scenes
+        df = pd.DataFrame(scenes)
+        
+        # Add video metadata as columns
+        for key, value in metadata.items():
+            if isinstance(value, (str, int, float, bool)):
+                df[f"video_{key}"] = value
+        
+        # Add audio information if available
+        if audio_result:
+            df["audio_file"] = audio_result.get("audio_file", "")
+            df["transcript_file"] = audio_result.get("transcript_json", "")
+            df["srt_file"] = audio_result.get("transcript_srt", "")
+        
+        # Add video ID
+        df["video_id"] = video_id
+        
+        # Calculate additional metrics
+        df["scene_duration"] = df["end_time"] - df["start_time"]
+        df["frame_rate"] = df["duration_frames"] / df["duration_seconds"]
+        
+        # Sort by start time
+        df = df.sort_values("start_time")
+        
+        # Reset index
+        df = df.reset_index(drop=True)
+        
+        return df 

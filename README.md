@@ -1,46 +1,131 @@
 # Video Timeline Analyzer
 
-A sophisticated video analysis application that generates interactive timelines with rich metadata including scene detection, transcribed subtitles, sentiment analysis, and viral moment scoring.
+A powerful video analysis tool that leverages CUDA acceleration for efficient processing of video content, including scene detection, audio transcription, and visual analysis.
 
-## 🌟 Features
+## 🚀 Features
 
-- **Scene Change Detection**: Automatically identify and mark scene transitions
-- **Speech-to-Text**: Generate accurate, timestamped transcripts
-- **Scene Context Analysis**: Extract visual metadata and scene descriptions 
-- **Sentiment & Emotion Analysis**: Analyze text, faces, and audio for emotional content
-- **Viral Moment Detection**: Algorithmically identify potentially viral segments
-- **Interactive Timeline UI**: Navigate through video with rich metadata cues
-- **Video Summarization**: Generate comprehensive video synopsis
+- **CUDA-Accelerated Processing**
+  - GPU-optimized video frame extraction
+  - CUDA-accelerated scene detection
+  - Hardware-accelerated audio transcription
+  - Efficient memory management
 
-## 🔧 Technologies
+- **Advanced Analysis**
+  - Scene detection with black frame handling
+  - Audio transcription using Whisper
+  - Visual analysis with CLIP and BLIP
+  - Frame-by-frame processing
 
-- **Scene Detection**: PySceneDetect with OpenCV fallback
-- **Transcription**: OpenAI Whisper with WhisperX enhancements
-- **Visual Analysis**: CLIP for tagging, BLIP-2 for captions
-- **Sentiment Analysis**: Hugging Face Transformers (BERT/DistilBERT)
-- **Facial Emotion**: DeepFace
-- **Audio Analysis**: pyAudioAnalysis/librosa
-- **Data Storage**: SQLite + JSON with optional FAISS/ChromaDB vector search
-- **UI Options**: Desktop (PyQt5/Tkinter) or Web (FastAPI + JavaScript)
+- **Comprehensive Output**
+  - Scene timestamps and metadata
+  - Audio transcriptions (SRT and JSON)
+  - Frame captions and embeddings
+  - Visual analysis results
 
-## 🚀 Getting Started
+## 🛠 Requirements
 
-> Detailed setup instructions will be added once the initial development is completed.
+- Python 3.8+
+- CUDA-capable GPU
+- FFmpeg
+- PyTorch with CUDA support
+- Additional dependencies in `requirements.txt`
 
-## 📋 Project Status
+## 📦 Installation
 
-This project is currently in the initial development phase. See the [ROADMAP.md](ROADMAP.md) for current progress and planned features.
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/video-timeline-analyzer.git
+cd video-timeline-analyzer
+```
 
-## 📄 License
+2. Create and activate a virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+venv\Scripts\activate     # Windows
+```
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-## 📊 Architecture
+## 🎮 Usage
 
-![System Architecture](docs/architecture_diagram.png)
+Basic usage:
+```bash
+python src/processors/cuda_pipeline.py video_path --output_dir output/video_name --model medium
+```
 
-*Architecture diagram will be added during development*
+Options:
+- `--model`: Whisper model size (tiny, base, small, medium, large)
+- `--gpu_memory`: Fraction of GPU memory to use (0.0-1.0)
+- `--sequential`: Disable parallel processing
+- `--output_dir`: Directory for output files
 
-## 👥 Contributing
+## 📁 Project Structure
 
-Contribution guidelines will be added as the project matures.
+```
+video-timeline-analyzer/
+├── src/
+│   ├── processors/
+│   │   ├── cuda_pipeline.py
+│   │   ├── scene_detector.py
+│   │   └── audio_processor.py
+│   ├── utils/
+│   │   ├── gpu_utils.py
+│   │   └── logging_config.py
+│   ├── config/
+│   │   └── cuda_config.py
+│   └── models/
+├── tests/
+├── docs/
+└── output/
+```
+
+## 🔧 Configuration
+
+CUDA settings can be configured in `src/config/cuda_config.py`:
+- GPU memory usage
+- Model parameters
+- Processing settings
+- Cache configuration
+
+## 📊 Output Structure
+
+```
+output/video_name/
+├── frames/
+│   ├── scene_XXX.jpg
+│   └── frames_data.json
+├── audio/
+│   └── audio.wav
+├── transcripts/
+│   ├── transcript.srt
+│   └── transcript.json
+└── metadata/
+    └── metadata.json
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## 📝 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+- OpenAI Whisper for audio transcription
+- CLIP and BLIP for visual analysis
+- FFmpeg for media processing
+- PyTorch team for CUDA support
+
+## 📈 Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for detailed development plans and progress tracking.

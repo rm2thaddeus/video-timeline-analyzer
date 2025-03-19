@@ -48,96 +48,81 @@ class SceneDetector:
         video_path = Path(video_path)
         video_id = video_path.stem
         
+        # Open video capture
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            logger.error("Failed to open video file")
+            return []
+        
+        # Get video properties
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        logger.info(f"Video has {total_frames} frames at {fps} FPS")
+        
+        # Initialize variables
+        scenes = []
+        current_scene_start = 0
+        prev_hist = None
+        frame_num = 0
+        
+        # Process frames
+        pbar = tqdm(total=total_frames, desc="Detecting scenes")
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            # Convert frame to grayscale and calculate histogram
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
+            cv2.normalize(hist, hist, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+            
+            # Compare with previous histogram
+            if prev_hist is not None:
+                diff = cv2.compareHist(prev_hist, hist, cv2.HISTCMP_CORREL)
+                if diff < (1 - self.threshold) and (frame_num - current_scene_start) >= self.min_scene_len:
+                    # Scene change detected
+                    scenes.append({
+                        "id": f"scene{len(scenes):03d}",
+                        "start_frame": current_scene_start,
+                        "end_frame": frame_num - 1,
+                        "start_time": current_scene_start / fps,
+                        "end_time": (frame_num - 1) / fps,
+                        "duration": (frame_num - 1 - current_scene_start) / fps
+                    })
+                    current_scene_start = frame_num
+            
+            prev_hist = hist
+            frame_num += 1
+            pbar.update(1)
+        
+        # Add final scene
+        if frame_num - current_scene_start >= self.min_scene_len:
+            scenes.append({
+                "id": f"scene{len(scenes):03d}",
+                "start_frame": current_scene_start,
+                "end_frame": frame_num - 1,
+                "start_time": current_scene_start / fps,
+                "end_time": (frame_num - 1) / fps,
+                "duration": (frame_num - 1 - current_scene_start) / fps
+            })
+        
+        # Close video capture
+        cap.release()
+        pbar.close()
+        
+        # Save scene data if output directory is provided
         if output_dir:
             output_dir = Path(output_dir)
-            output_dir.mkdir(exist_ok=True)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            scene_data = {
+                "video_id": video_id,
+                "total_frames": total_frames,
+                "fps": fps,
+                "scenes": scenes
+            }
+            scene_data_path = output_dir / f"{video_id}_scenes.json"
+            with open(scene_data_path, "w") as f:
+                json.dump(scene_data, f, indent=2)
         
-        logger.info(f"Detecting scenes with OpenCV in {video_path} (threshold={self.threshold})")
-        
-        try:
-            cap = cv2.VideoCapture(str(video_path))
-            
-            if not cap.isOpened():
-                raise ValueError(f"Could not open video file: {video_path}")
-                
-            # Get video properties
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            
-            logger.info(f"Video has {frame_count} frames at {fps} FPS")
-            
-            # Initialize variables
-            prev_hist = None
-            scene_boundaries = [0]  # First frame is always a scene boundary
-            current_frame = 0
-            
-            # Process frames for scene detection
-            with tqdm(total=frame_count, desc="Detecting scenes") as pbar:
-                while True:
-                    ret, frame = cap.read()
-                    
-                    if not ret:
-                        break
-                        
-                    # Convert to grayscale and calculate histogram
-                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                    hist = cv2.calcHist([gray], [0], None, [64], [0, 256])
-                    cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
-                    
-                    # Compare with previous histogram
-                    if prev_hist is not None:
-                        # Calculate histogram correlation (1.0 means identical, 0.0 means completely different)
-                        corr = cv2.compareHist(hist, prev_hist, cv2.HISTCMP_CORREL)
-                        
-                        # If correlation is below threshold, mark as scene boundary
-                        if corr < (1.0 - self.threshold) and (current_frame - scene_boundaries[-1]) >= self.min_scene_len:
-                            scene_boundaries.append(current_frame)
-                            logger.debug(f"Scene boundary detected at frame {current_frame} (time: {current_frame/fps:.2f}s)")
-                    
-                    prev_hist = hist
-                    current_frame += 1
-                    pbar.update(1)
-                    
-                    # Log progress periodically
-                    if current_frame % 500 == 0:
-                        logger.debug(f"Processed {current_frame}/{frame_count} frames ({current_frame/frame_count*100:.1f}%)")
-            
-            # Add last frame as scene boundary if not already added
-            if scene_boundaries[-1] != frame_count - 1:
-                scene_boundaries.append(frame_count - 1)
-                
-            cap.release()
-            
-            # Convert boundaries to scenes
-            scenes = []
-            for i in range(len(scene_boundaries) - 1):
-                start_frame = scene_boundaries[i]
-                end_frame = scene_boundaries[i + 1]
-                
-                # Calculate timestamps
-                start_time = start_frame / fps
-                end_time = end_frame / fps
-                duration = end_time - start_time
-                
-                scenes.append({
-                    "scene_id": i,
-                    "video_id": video_id,
-                    "start_frame": start_frame,
-                    "end_frame": end_frame,
-                    "start_time": start_time,
-                    "end_time": end_time,
-                    "duration": duration
-                })
-            
-            # Save scene boundaries to JSON file if output_dir is provided
-            if output_dir:
-                output_file = output_dir / f"{video_id}_scenes.json"
-                with open(output_file, 'w') as f:
-                    json.dump(scenes, f, indent=2)
-                logger.info(f"Saved {len(scenes)} scene boundaries to {output_file}")
-            
-            return scenes
-            
-        except Exception as e:
-            logger.error(f"Error during scene detection: {e}")
-            raise 
+        return scenes 
