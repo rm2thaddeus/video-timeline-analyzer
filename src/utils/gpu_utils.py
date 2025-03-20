@@ -1,154 +1,184 @@
 """
-📌 Purpose: GPU utilities for managing CUDA operations and memory
-🔄 Latest Changes: Initial implementation of GPU utilities
-⚙️ Key Logic: Provides functions for GPU setup, memory management, and device selection
-📂 Expected File Path: src/utils/gpu_utils.py
-🧠 Reasoning: Centralizes GPU-related operations for better resource management
+📌 Purpose: GPU utilities for the video processing pipeline
+🔄 Latest Changes: Initial creation
+⚙️ Key Logic: Functions to detect and utilize GPU resources
+📂 Expected File Path: test_pipeline/utils/gpu_utils.py
+🧠 Reasoning: Centralize GPU handling for consistent resource utilization
 """
 
 import os
 import torch
-import torch.cuda as cuda
-import torch.backends.cudnn as cudnn
-from loguru import logger
-import gc
+import logging
+import subprocess
+from typing import Dict, Any, Tuple, Optional
 
-def setup_cuda(gpu_memory_fraction=0.8, enable_benchmark=True):
+logger = logging.getLogger("video_pipeline.gpu_utils")
+
+def detect_gpu() -> Dict[str, Any]:
     """
-    Configure CUDA settings and initialize GPU environment.
-    
-    Args:
-        gpu_memory_fraction (float): Fraction of GPU memory to use (0.0-1.0)
-        enable_benchmark (bool): Whether to enable cuDNN benchmark mode
+    Detect available GPU resources and return relevant information.
     
     Returns:
-        torch.device: Selected device (GPU or CPU)
+        Dict with GPU information including:
+        - detected: Whether a GPU was detected
+        - gpu_type: Type of GPU (cuda, mps, or cpu)
+        - device_count: Number of available devices
+        - optimal_device: Recommended device for processing
     """
-    if not torch.cuda.is_available():
-        logger.warning("CUDA is not available. Using CPU instead.")
-        return torch.device('cpu')
-    
-    # Set device
-    device = torch.device('cuda')
-    
-    # Configure cuDNN
-    if enable_benchmark:
-        cudnn.benchmark = True
-    cudnn.deterministic = True
-    
-    # Set memory fraction
-    if gpu_memory_fraction > 0:
-        total_memory = torch.cuda.get_device_properties(0).total_memory
-        max_memory = int(total_memory * gpu_memory_fraction)
-        torch.cuda.set_per_process_memory_fraction(gpu_memory_fraction)
-    
-    # Log GPU info
-    logger.info(f"Using GPU: {torch.cuda.get_device_name(0)}")
-    logger.info(f"Total GPU memory: {total_memory / 1e9:.2f} GB")
-    logger.info(f"Allocated memory: {max_memory / 1e9:.2f} GB")
-    
-    return device
-
-def clear_gpu_memory():
-    """
-    Clear GPU memory cache and run garbage collection.
-    """
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        gc.collect()
-        cuda.synchronize()
-        logger.debug("GPU memory cleared")
-
-def get_gpu_memory_info():
-    """
-    Get current GPU memory usage information.
-    
-    Returns:
-        dict: Memory information including total, allocated, and free memory
-    """
-    if not torch.cuda.is_available():
-        return None
-    
-    total = torch.cuda.get_device_properties(0).total_memory
-    reserved = torch.cuda.memory_reserved(0)
-    allocated = torch.cuda.memory_allocated(0)
-    free = reserved - allocated
-    
-    return {
-        'total_gb': total / 1e9,
-        'reserved_gb': reserved / 1e9,
-        'allocated_gb': allocated / 1e9,
-        'free_gb': free / 1e9
+    gpu_info = {
+        "detected": False,
+        "gpu_type": "cpu",
+        "device_count": 0,
+        "optimal_device": "cpu"
     }
-
-def optimize_gpu_memory(model, use_half_precision=True):
-    """
-    Optimize model memory usage with optional half-precision.
     
-    Args:
-        model (torch.nn.Module): PyTorch model to optimize
-        use_half_precision (bool): Whether to use FP16 precision
+    # Check for CUDA
+    if torch.cuda.is_available():
+        gpu_info["detected"] = True
+        gpu_info["gpu_type"] = "cuda"
+        gpu_info["device_count"] = torch.cuda.device_count()
+        gpu_info["optimal_device"] = "cuda"
+        logger.info(f"CUDA GPU detected. Device count: {gpu_info['device_count']}")
+        
+    # Check for MPS (Apple Silicon)
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        gpu_info["detected"] = True
+        gpu_info["gpu_type"] = "mps"
+        gpu_info["device_count"] = 1
+        gpu_info["optimal_device"] = "mps"
+        logger.info("Apple Silicon MPS device detected")
+    
+    else:
+        logger.warning("No GPU detected, falling back to CPU")
+    
+    return gpu_info
+
+def get_memory_info() -> Dict[str, float]:
+    """
+    Get GPU memory information (if available).
     
     Returns:
-        torch.nn.Module: Optimized model
+        Dict with memory information in GB:
+        - total_gb: Total GPU memory
+        - allocated_gb: Currently allocated memory
+        - free_gb: Available memory
     """
-    if not torch.cuda.is_available():
-        return model
+    memory_info = {
+        "total_gb": 0.0,
+        "allocated_gb": 0.0,
+        "free_gb": 0.0
+    }
     
-    if use_half_precision:
-        model = model.half()
+    if torch.cuda.is_available():
+        device = torch.cuda.current_device()
+        total_memory = torch.cuda.get_device_properties(device).total_memory
+        reserved_memory = torch.cuda.memory_reserved(device)
+        allocated_memory = torch.cuda.memory_allocated(device)
+        free_memory = total_memory - allocated_memory
+        
+        # Convert to GB
+        memory_info["total_gb"] = total_memory / (1024**3)
+        memory_info["allocated_gb"] = allocated_memory / (1024**3)
+        memory_info["free_gb"] = free_memory / (1024**3)
+        
+        logger.info(f"GPU Memory - Total: {memory_info['total_gb']:.2f}GB, "
+                   f"Allocated: {memory_info['allocated_gb']:.2f}GB, "
+                   f"Free: {memory_info['free_gb']:.2f}GB")
+    else:
+        logger.warning("No CUDA device available for memory reporting")
     
-    return model.cuda()
+    return memory_info
 
-def batch_to_device(batch, device):
+def get_pcie_bandwidth() -> Dict[str, Any]:
     """
-    Move a batch of data to the specified device.
-    
-    Args:
-        batch: Input batch (can be tensor, list, tuple, or dict)
-        device: Target device
+    Get PCIe bandwidth information using nvidia-smi if available.
     
     Returns:
-        Batch data on the target device
+        Dict with PCIe information or error message
     """
-    if isinstance(batch, torch.Tensor):
-        return batch.to(device)
-    elif isinstance(batch, (list, tuple)):
-        return [batch_to_device(item, device) for item in batch]
-    elif isinstance(batch, dict):
-        return {k: batch_to_device(v, device) for k, v in batch.items()}
-    return batch
+    bandwidth_info = {"error": ""}
+    
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=pcie.link.gen.current,pcie.link.width.current", "--format=csv,noheader"],
+            capture_output=True, text=True, check=True
+        )
+        if result.stdout.strip():
+            gen, width = result.stdout.strip().split(", ")
+            bandwidth_info = {
+                "generation": gen,
+                "width": width,
+                "theoretical_bandwidth_gbps": float(gen) * float(width) * 0.985
+            }
+            logger.info(f"PCIe Bandwidth: Gen {gen}, Width {width}, "
+                       f"Theoretical: {bandwidth_info['theoretical_bandwidth_gbps']:.2f} GB/s")
+    except (subprocess.SubprocessError, FileNotFoundError, ValueError) as e:
+        bandwidth_info["error"] = str(e)
+        logger.error(f"Error getting PCIe bandwidth information: {e}")
+    
+    return bandwidth_info
 
-def get_optimal_batch_size(model, input_shape, target_memory_usage=0.7):
+def get_optimal_batch_size(model_name: str) -> int:
     """
-    Estimate optimal batch size based on available GPU memory.
+    Calculate optimal batch size based on available GPU memory and model.
     
     Args:
-        model (torch.nn.Module): Model to analyze
-        input_shape (tuple): Shape of a single input
-        target_memory_usage (float): Target memory usage fraction
-    
+        model_name: Name of the model to use (e.g., 'clip', 'whisper')
+        
     Returns:
-        int: Estimated optimal batch size
+        Recommended batch size
     """
+    memory_info = get_memory_info()
+    
+    # Default conservative batch sizes based on model and available memory
     if not torch.cuda.is_available():
         return 1
     
-    clear_gpu_memory()
-    total_memory = torch.cuda.get_device_properties(0).total_memory
-    available_memory = total_memory * target_memory_usage
+    free_memory_gb = memory_info["free_gb"]
     
-    # Test with batch size of 1
-    try:
-        sample_input = torch.randn(1, *input_shape).cuda()
-        with torch.no_grad():
-            _ = model(sample_input)
-        memory_per_sample = torch.cuda.memory_allocated()
-        optimal_batch_size = max(1, int(available_memory / memory_per_sample))
-    except Exception as e:
-        logger.warning(f"Error estimating batch size: {e}")
-        optimal_batch_size = 1
-    finally:
-        clear_gpu_memory()
+    # Model-specific batch size calculation
+    if model_name.lower() == 'clip':
+        # CLIP typically uses ~1.5-2GB for ViT-B/32 with batch size of 16
+        return max(1, min(32, int(free_memory_gb / 0.125)))
+    elif model_name.lower() == 'whisper':
+        # Whisper base model uses ~1GB for 30-second audio segments
+        return max(1, min(16, int(free_memory_gb / 0.25)))
+    else:
+        # Generic conservative estimate
+        return max(1, min(8, int(free_memory_gb / 0.5)))
+
+def setup_device(force_cpu: bool = False) -> Tuple[torch.device, bool]:
+    """
+    Set up the optimal device for processing.
     
-    return optimal_batch_size
+    Args:
+        force_cpu: Whether to force CPU usage even if GPU is available
+        
+    Returns:
+        Tuple of (device, is_cuda_available)
+    """
+    if force_cpu:
+        logger.warning("Forcing CPU usage as requested")
+        return torch.device("cpu"), False
+        
+    gpu_info = detect_gpu()
+    
+    if gpu_info["detected"] and not force_cpu:
+        device_str = gpu_info["optimal_device"]
+        device = torch.device(device_str)
+        
+        if device_str == "cuda":
+            properties = {
+                "name": torch.cuda.get_device_name(0),
+                "capability": torch.cuda.get_device_capability(0),
+                "memory": get_memory_info()
+            }
+            logger.info(f"Using GPU: {properties['name']}")
+            return device, True
+        elif device_str == "mps":
+            properties = {"name": "Apple Silicon MPS"}
+            logger.info("Using Apple Silicon GPU via MPS")
+            return device, True
+    
+    logger.warning("Using CPU for computation")
+    return torch.device("cpu"), False 

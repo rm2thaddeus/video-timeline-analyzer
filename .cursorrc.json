@@ -59,6 +59,38 @@
           "description": "Comprehensive logging for debugging and monitoring"
         }
       ]
+    },
+    {
+      "name": "PowerShell Commands",
+      "description": "Rules for handling PowerShell commands in Windows environments",
+      "checks": [
+        {
+          "id": "file-operations",
+          "description": "Use PowerShell-specific cmdlets for file operations",
+          "examples": {
+            "remove": "Remove-Item -Path 'path/to/file' -Force",
+            "move": "Move-Item -Path 'source' -Destination 'dest' -Force",
+            "copy": "Copy-Item -Path 'source' -Destination 'dest' -Force",
+            "mkdir": "New-Item -ItemType Directory -Path 'path' -Force"
+          }
+        },
+        {
+          "id": "path-handling",
+          "description": "Use proper path formats for Windows",
+          "examples": {
+            "paths": "Use backslashes or escaped forward slashes",
+            "spaces": "Wrap paths with spaces in quotes"
+          }
+        },
+        {
+          "id": "error-handling",
+          "description": "Include error handling parameters",
+          "examples": {
+            "silent-continue": "-ErrorAction SilentlyContinue",
+            "stop": "-ErrorAction Stop"
+          }
+        }
+      ]
     }
   ],
   "directories": [

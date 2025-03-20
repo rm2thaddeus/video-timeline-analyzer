@@ -6,7 +6,7 @@ This guide provides detailed instructions for setting up the development environ
 
 Before setting up the development environment, ensure you have the following installed:
 
-1. **Python 3.8+** (3.10 recommended)
+1. **Python 3.8+** (3.9 recommended)
 2. **Git**
 3. **FFmpeg 4.0+**
 4. **CUDA Toolkit 11.7+** (for NVIDIA GPUs) or **ROCm 5.0+** (for AMD GPUs)
