@@ -24,10 +24,10 @@ A powerful video analysis tool that leverages CUDA acceleration for efficient pr
 
 ## 🛠 Requirements
 
-- Python 3.8+
+- Python 3.9+
 - CUDA-capable GPU
 - FFmpeg
-- PyTorch with CUDA support
+- PyTorch with CUDA support (install manually in venv)
 - Additional dependencies in `requirements.txt`
 
 ## 📦 Installation
@@ -40,15 +40,29 @@ cd video-timeline-analyzer
 
 2. Create and activate a virtual environment:
 ```bash
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-venv\Scripts\activate     # Windows
+python -m venv .venv
+.venv\Scripts\activate     # Windows
+source .venv/bin/activate  # Linux/Mac
 ```
 
-3. Install dependencies:
+3. Install dependencies (PyTorch is commented out in requirements.txt):
 ```bash
 pip install -r requirements.txt
 ```
+
+4. **Install PyTorch in the venv:**
+   - Use the official selector to get the right command for your system and CUDA version: https://pytorch.org/get-started/locally/
+   - Example (CUDA 12.1):
+     ```bash
+     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+     ```
+
+5. **Test GPU availability after installation:**
+```bash
+python scripts/test_gpu.py
+```
+
+For more details and troubleshooting, see [ROADMAP.md](ROADMAP.md).
 
 ## 🎮 Usage
 
@@ -129,3 +143,20 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 📈 Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for detailed development plans and progress tracking.
+
+## 🛠 Troubleshooting CUDA & PyTorch
+
+- **Multiple PyTorch Versions:**
+  - Use venvs to avoid conflicts. Do not install PyTorch globally.
+- **CUDA Version Mismatch:**
+  - Check your NVIDIA driver and CUDA version with `nvidia-smi`.
+  - Use the correct PyTorch build for your CUDA version.
+- **ImportError or ModuleNotFoundError:**
+  - Ensure the venv is activated before running any code.
+- **Best Practices:**
+  1. Always use venvs for Python projects.
+  2. Avoid global PyTorch installs.
+  3. Use flexible version specs in requirements.txt.
+  4. Test GPU availability after setup.
+
+See [ROADMAP.md](ROADMAP.md) for more details and troubleshooting tips.

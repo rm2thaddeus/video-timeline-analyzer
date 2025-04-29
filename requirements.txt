@@ -1,15 +1,21 @@
 # Purpose: Minimal requirements for GPU tests using PyTorch.
-# Latest Changes: Updated to use flexible versioning without pinning specific versions.
+# Latest Changes: Updated to require manual installation of PyTorch in the venv for reproducibility and CUDA compatibility.
 # Key Logic: Only install packages necessary to verify GPU functionality.
 # Expected File Path: /project_root/requirements.txt
 # Reasoning: Using flexible versioning to avoid conflicts with system-installed packages.
+#
+# IMPORTANT: PyTorch and related packages must be installed manually in the venv.
+# See ROADMAP.md for instructions and the official selector: https://pytorch.org/get-started/locally/
+# Example (CUDA 12.1):
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 # Note: To install the CUDA-enabled builds, use the command:
 #       pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu118
 
 # Core dependencies with flexible versioning
-torch
-torchvision
+# torch
+# torchvision
+# torchaudio
 numpy>=1.23.0
 pandas>=1.5.0
 matplotlib>=3.5.0
@@ -37,8 +43,8 @@ openai-whisper>=20230314
 # whisperx is optional and can be installed separately if needed
 
 # Computer vision and embeddings
-torch>=2.0.0
-torchvision>=0.15.0
+# torch>=2.0.0
+# torchvision>=0.15.0
 Pillow>=9.0.0
 ftfy>=6.1.1
 regex>=2022.1.18
@@ -57,9 +63,9 @@ matplotlib>=3.6.0
 # Core dependencies
 numpy>=1.21.0
 opencv-python>=4.5.0
-torch>=2.0.0  # CUDA support
-torchvision>=0.15.0
-torchaudio>=2.0.0
+# torch>=2.0.0  # CUDA support
+# torchvision>=0.15.0
+# torchaudio>=2.0.0
 transformers>=4.30.0
 pillow>=9.0.0
 ffmpeg-python>=0.2.0

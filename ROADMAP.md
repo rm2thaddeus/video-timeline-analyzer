@@ -1,13 +1,65 @@
 # Video Timeline Analyzer Roadmap
 
+<!--
+📌 Purpose – Project development roadmap and environment setup guidance
+🔄 Latest Changes – Updated environment setup instructions: removed reference to shared venv, now recommend local venv in project root. Note added: PyTorch must be installed manually for compatibility.
+⚙️ Key Logic – Phased development, reproducibility, and environment management
+📂 Expected File Path – ROADMAP.md (project root)
+🧠 Reasoning – Ensures clarity and reproducibility for all contributors, avoids CUDA/PyTorch conflicts.
+-->
+
 This roadmap outlines the development path for the Video Timeline Analyzer project, providing a clear timeline of planned features, milestones, and progress tracking.
+
+## Environment Setup (Updated)
+
+- Always use a local virtual environment for this project to avoid version conflicts and ensure reproducibility.
+- Prerequisites:
+  - Python 3.9 or higher
+  - NVIDIA GPU with compatible drivers and CUDA installed
+- Create and activate a local virtual environment in the project root:
+  ```sh
+  python -m venv .venv
+  .venv\Scripts\activate  # On Windows
+  source .venv/bin/activate  # On macOS/Linux
+  ```
+- Install dependencies from `requirements.txt` (PyTorch line is commented out):
+  ```sh
+  pip install -r requirements.txt
+  ```
+- **Install PyTorch in the venv:**
+  - Use the official selector to get the right command for your system and CUDA version: https://pytorch.org/get-started/locally/
+  - Example (CUDA 12.1):
+    ```sh
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+    ```
+- **Test GPU availability after installation:**
+  ```sh
+  python scripts/test_gpu.py
+  ```
+- All dependencies, including PyTorch, must be installed in the venv for reproducibility.
+- Remove any references to the old shared venv (`C:\WINDOWS\System32\pytorch-env`).
+
+## PyTorch & CUDA Troubleshooting
+
+- **Multiple PyTorch Versions:**
+  - Use venvs to avoid conflicts. Do not install PyTorch globally.
+- **CUDA Version Mismatch:**
+  - Check your NVIDIA driver and CUDA version with `nvidia-smi`.
+  - Use the correct PyTorch build for your CUDA version.
+- **ImportError or ModuleNotFoundError:**
+  - Ensure the venv is activated before running any code.
+- **Best Practices:**
+  1. Always use venvs for Python projects.
+  2. Avoid global PyTorch installs.
+  3. Use flexible version specs in requirements.txt.
+  4. Test GPU availability after setup.
 
 ## Phase 1: Project Setup & Core Infrastructure (Week 1)
 
 - [x] Create GitHub repository
 - [x] Set up initial documentation (README, ROADMAP)
 - [x] Establish project structure and architecture
-- [x] Set up dev environment configuration (requirements.txt, environment.yml) using the shared venv at "C:\WINDOWS\System32\pytorch-env"
+- [x] Set up dev environment configuration (requirements.txt, environment.yml) using a local venv in the project root
 - [x] Address dependency management between PyTorch and Python to ensure smooth GPU integration
 - [x] Implement GPU detection and utilization (diagnostic validated by test_gpu.py)
 - [x] Write initial unit tests for GPU utilities
