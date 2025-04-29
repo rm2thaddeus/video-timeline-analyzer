@@ -175,7 +175,7 @@ This roadmap outlines the development path for the Video Timeline Analyzer proje
 | Phase 8 | 0%         | Not Started |
 | Phase 9 | 0%         | Not Started |
 
-_Last Updated: 2025-03-19_
+_Last Updated: 2024-07-30_
 
 ## Recent Achievements
 
@@ -196,6 +196,9 @@ _Last Updated: 2025-03-19_
    - Optimized BLIP caption generation
    - Improved Whisper transcription accuracy
    - Added configurable model selection
+
+4. Refined core pipeline logic:
+   - Standardized frame extraction to output one frame per scene in the main pipeline for consistency.
 
 ## Next Steps
 
