@@ -258,16 +258,16 @@ def process_command(args: argparse.Namespace) -> int:
         int: Exit code
     """
     logger.info(f"Processing video: {args.video_path}")
-    
+
     # Check if video file exists
     if not os.path.isfile(args.video_path):
         logger.error(f"Video file not found: {args.video_path}")
         return 1
-    
+
     # Create output directory
     output_dir = args.output_dir
     os.makedirs(output_dir, exist_ok=True)
-    
+
     # Check GPU availability if requested
     if args.use_gpu:
         gpu_info = detect_gpu()
@@ -275,24 +275,27 @@ def process_command(args: argparse.Namespace) -> int:
             logger.info(f"Using GPU ({gpu_info['gpu_type']}) for processing")
         else:
             logger.warning("GPU requested but not available, falling back to CPU")
-    
+    else:
+        logger.info("GPU usage not requested.")
+
     # Create configuration
     config = AnalysisConfig(
         scene_detection_method=args.scene_method,
         scene_threshold=args.scene_threshold,
         min_scene_length=args.min_scene_length,
-        extract_key_frames=True,
+        extract_key_frames=True, # Assuming we always want keyframes for now
         key_frames_method=args.frame_method,
         use_gpu=args.use_gpu,
         batch_size=args.batch_size,
         max_workers=args.max_workers,
         transcribe_audio=not args.no_audio,
-        detect_faces=not args.no_visual
+        detect_faces=not args.no_visual # Assuming face detection for now if visual enabled
     )
-    
+
     # Create and run pipeline
     pipeline = VideoProcessingPipeline(config)
-    
+
+    # --- Restore the pipeline execution block ---
     try:
         results = pipeline.process_video(
             video_path=args.video_path,
@@ -300,18 +303,20 @@ def process_command(args: argparse.Namespace) -> int:
             save_results=True
         )
         
-        if results:
+        if results is None:
+            logger.error("Pipeline failed: Could not extract video metadata or encountered a critical error. Please check that the video file is valid and readable by ffmpeg.")
+            return 1
+        else:
             logger.info(f"Successfully processed video with {len(results.timeline.scenes)} scenes")
             logger.info(f"Results saved to: {output_dir}")
             logger.info(f"Processing time: {results.processing_time:.2f} seconds")
-            return 0
-        else:
-            logger.error("Failed to process video")
-            return 1
-    
+            return 0 # Success
     except Exception as e:
         logger.error(f"Error processing video: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return 1
+    # --- End of restored block ---
 
 def process_batch_command(args: argparse.Namespace) -> int:
     """
@@ -632,18 +637,26 @@ def main(argv: Optional[List[str]] = None) -> int:
     Returns:
         int: Exit code
     """
+    print("--- DEBUG: Entered main() ---")
     parser = setup_parser()
+    
+    print("--- DEBUG: Calling parser.parse_args() ---")
     args = parser.parse_args(argv)
+    print(f"--- DEBUG: Args parsed: {args} ---")
     
     # Handle case where no command is provided
     if not args.command:
+        print("--- DEBUG: No command provided, printing help. ---")
         parser.print_help()
         return 1
     
+    print(f"--- DEBUG: Routing command: {args.command} ---")
     # Route to appropriate command handler
     if args.command == "process":
+        print("--- DEBUG: Calling process_command... ---")
         return process_command(args)
     elif args.command == "process-batch":
+        print("--- DEBUG: Calling process_batch_command... ---")
         return process_batch_command(args)
     elif args.command == "extract-scenes":
         return extract_scenes_command(args)

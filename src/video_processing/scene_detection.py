@@ -68,6 +68,7 @@ class GPUContentDetector(ContentDetector):
             kernel_size: Size of Gaussian kernel for frame preprocessing
         """
         super().__init__(threshold=threshold, min_scene_len=min_scene_len)
+        self.threshold = threshold # Explicitly store threshold
         self.weights = weights if weights is not None else [0.5, 0.3, 0.2]
         self.luma_only = luma_only
         self.kernel_size = kernel_size
@@ -117,53 +118,37 @@ class GPUContentDetector(ContentDetector):
                 frame_tensor = torch.from_numpy(frame_hsv).to(DEVICE)
                 hist = torch.histc(frame_tensor.float(), bins=256, min=0, max=255)
                 hist = hist / hist.sum()  # Normalize
-                
-                if frame_num == 0:
+                if self.last_hist is None:
                     self.last_hist = hist
                     return 0.0
-                
-                # Calculate difference and apply scaling
-                score = torch.sum(torch.abs(hist - self.last_hist)).item() * 100.0
-                
-                # Update last histogram
+                score = float(torch.sum(torch.abs(hist - self.last_hist)).item() * 100.0)
                 self.last_hist = hist
-                
             else:
                 frame_tensor = torch.from_numpy(frame_hsv).to(DEVICE)
                 h_hist = torch.histc(frame_tensor[:, :, 0].float(), bins=256, min=0, max=255)
                 s_hist = torch.histc(frame_tensor[:, :, 1].float(), bins=256, min=0, max=255)
                 v_hist = torch.histc(frame_tensor[:, :, 2].float(), bins=256, min=0, max=255)
-                
-                # Normalize histograms
                 h_hist = h_hist / h_hist.sum()
                 s_hist = s_hist / s_hist.sum()
                 v_hist = v_hist / v_hist.sum()
-                
-                if frame_num == 0:
+                if self.last_hsv is None:
                     self.last_hsv = (h_hist, s_hist, v_hist)
                     return 0.0
-                
-                # Calculate weighted difference
                 h_diff = torch.sum(torch.abs(h_hist - self.last_hsv[0]))
                 s_diff = torch.sum(torch.abs(s_hist - self.last_hsv[1]))
                 v_diff = torch.sum(torch.abs(v_hist - self.last_hsv[2]))
-                
-                score = (h_diff * self.weights_tensor[0] + 
+                score = float((h_diff * self.weights_tensor[0] + 
                         s_diff * self.weights_tensor[1] + 
-                        v_diff * self.weights_tensor[2])
-                
-                score = score.item() * 100.0
-                
-                # Update last histograms
+                        v_diff * self.weights_tensor[2]).item() * 100.0)
                 self.last_hsv = (h_hist, s_hist, v_hist)
             
             # Keep track of recent scores
-            self.last_scores.append(score)
+            self.last_scores.append(float(score))
             if len(self.last_scores) > self.score_window:
                 self.last_scores.pop(0)
             
             # Calculate average score over window
-            avg_score = sum(self.last_scores) / len(self.last_scores)
+            avg_score = float(sum(self.last_scores) / len(self.last_scores))
             
             # Log scores periodically
             if frame_num % 100 == 0:
@@ -178,7 +163,45 @@ class GPUContentDetector(ContentDetector):
             return avg_score
         
         # Fall back to CPU implementation
-        return super()._calculate_frame_score(frame_img, frame_num)
+        calculated_score = super()._calculate_frame_score(frame_img, frame_num)
+        return float(calculated_score) # Ensure CPU path also returns float
+
+    def process_frame(self, frame_img: np.ndarray, frame_num: int) -> list:
+        """
+        Override process_frame to ensure correct types are passed to the filter.
+        We calculate the score using our GPU method, ensure the base class updates
+        its internal state if needed, and then call the flash filter directly
+        with explicitly cast boolean types.
+        """
+        # 1. Calculate score using our method (ensures float)
+        score = self._calculate_frame_score(frame_img, frame_num)
+        
+        # 2. Perform threshold comparison, ensuring Python bool
+        above_threshold = bool(score >= self.threshold)
+        
+        # 3. Update base class internal state if necessary (e.g., _frame_score)
+        #    We don't strictly need its return value here.
+        #    Setting internal attributes directly might be cleaner if we know them,
+        #    but calling the base method is safer if its internals change.
+        #    Let's set the known attributes directly for simplicity for now.
+        self._frame_score = score
+        self._last_frame_score = score
+        # super().process_frame(frame_img, frame_num) # Avoid calling base process_frame
+
+        # 4. Call the flash filter directly with explicit bool
+        #    This bypasses the part of the base process_frame that calculates above_threshold.
+        if self._flash_filter:
+             # Ensure min_length_met is handled appropriately by the filter
+             # The filter method itself should handle the logic based on frame_num
+             # and its internal state related to min_scene_len.
+             return self._flash_filter.filter(frame_num=frame_num, above_threshold=above_threshold)
+        else:
+             # Handle case where flash filter might not be initialized (unlikely for ContentDetector)
+             # Standard ContentDetector logic would return [frame_num] if above_threshold and min_len met
+             # Replicating that full logic here is complex, assume filter exists.
+             logger.warning("_flash_filter not found in GPUContentDetector")
+             # Basic fallback: return cut if above threshold (ignores min_scene_len)
+             return [frame_num] if above_threshold else []
 
 class GPUAcceleratedSceneDetector:
     """

@@ -64,6 +64,7 @@ def extract_video_metadata(file_path: str) -> Optional[VideoMetadata]:
         VideoMetadata object if successful, None otherwise
     """
     if not validate_video_file(file_path):
+        logger.error(f"extract_video_metadata: Validation failed for file: {file_path}")
         return None
     
     try:
@@ -72,7 +73,7 @@ def extract_video_metadata(file_path: str) -> Optional[VideoMetadata]:
                              if stream['codec_type'] == 'video'), None)
         
         if video_stream is None:
-            logger.error(f"No video stream found in file: {file_path}")
+            logger.error(f"extract_video_metadata: No video stream found in file: {file_path}")
             return None
         
         # Extract video properties
@@ -105,10 +106,10 @@ def extract_video_metadata(file_path: str) -> Optional[VideoMetadata]:
         return metadata
     
     except ffmpeg.Error as e:
-        logger.error(f"Error extracting video metadata: {e.stderr.decode() if hasattr(e, 'stderr') else str(e)}")
+        logger.error(f"extract_video_metadata: ffmpeg.Error for file {file_path}: {e.stderr.decode() if hasattr(e, 'stderr') else str(e)}")
         return None
     except Exception as e:
-        logger.error(f"Unexpected error extracting video metadata: {str(e)}")
+        logger.error(f"extract_video_metadata: Unexpected error for file {file_path}: {str(e)}")
         return None
 
 
