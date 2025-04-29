@@ -21,7 +21,7 @@ import ffmpeg
 import numpy as np
 
 from src.models.schema import VideoMetadata
-from src.utils.gpu_utils import get_optimal_device
+from src.utils.gpu_utils import setup_device
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +219,7 @@ def extract_audio(video_path: str, output_path: str, format: str = 'wav') -> boo
 
 
 # Consider GPU availability for video decoding when possible
-DEVICE = get_optimal_device()
+DEVICE = setup_device()
 if DEVICE.type == 'cuda':
     logger.info("CUDA device available for video processing")
     # Note: OpenCV needs to be built with CUDA support for this to work

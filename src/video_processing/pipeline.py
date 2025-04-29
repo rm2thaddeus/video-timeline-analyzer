@@ -27,15 +27,15 @@ import numpy as np
 import torch
 
 from src.models.schema import Scene, Frame, VideoMetadata, AnalysisConfig, AnalysisResults
-from src.utils.gpu_utils import get_optimal_device, clear_gpu_memory, memory_stats
+from src.utils.gpu_utils import setup_device, get_memory_info, clear_gpu_memory, memory_stats
 from src.video_processing.loader import extract_video_metadata, create_video_capture
-from src.video_processing.scene_detection import GPUAcceleratedSceneDetector, DetectionMethod
+from src.video_processing.scene_detection import detect_scenes, DetectionMethod, GPUAcceleratedSceneDetector
 from src.video_processing.frame_extraction import FrameExtractor, FrameExtractionMethod
 
 logger = logging.getLogger(__name__)
 
 # Get the optimal device (GPU if available, otherwise CPU)
-DEVICE = get_optimal_device()
+DEVICE = setup_device()
 
 
 class VideoProcessingPipeline:
@@ -49,7 +49,7 @@ class VideoProcessingPipeline:
             config: Configuration for the pipeline
         """
         self.config = config or AnalysisConfig()
-        self.device = get_optimal_device() if self.config.use_gpu else torch.device('cpu')
+        self.device = setup_device() if self.config.use_gpu else torch.device('cpu')
         
         # Initialize components
         self.scene_detector = GPUAcceleratedSceneDetector(
@@ -105,8 +105,7 @@ class VideoProcessingPipeline:
         # Detect scenes
         scenes = self.scene_detector.detect_scenes(
             video_path,
-            stats_file=os.path.join(scene_output_dir, "scene_stats.csv") if save_results else None,
-            extract_frames=False  # We'll extract frames in the next step
+            stats_file=os.path.join(scene_output_dir, "scene_stats.csv") if save_results else None
         )
         
         # Save scene data if requested

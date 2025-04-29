@@ -18,7 +18,7 @@ import json
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 
-from src.utils.gpu_utils import detect_gpu, get_optimal_device, optimize_gpu_settings
+from src.utils.gpu_utils import detect_gpu, setup_device
 from src.models.schema import AnalysisConfig
 from src.video_processing.pipeline import VideoProcessingPipeline
 from src.video_processing.scene_detection import DetectionMethod
@@ -26,7 +26,7 @@ from src.video_processing.frame_extraction import FrameExtractionMethod
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()],
 )
@@ -270,10 +270,9 @@ def process_command(args: argparse.Namespace) -> int:
     
     # Check GPU availability if requested
     if args.use_gpu:
-        has_gpu, gpu_type, _ = detect_gpu()
-        if has_gpu:
-            logger.info(f"Using GPU ({gpu_type}) for processing")
-            optimize_gpu_settings()
+        gpu_info = detect_gpu()
+        if gpu_info["detected"]:
+            logger.info(f"Using GPU ({gpu_info['gpu_type']}) for processing")
         else:
             logger.warning("GPU requested but not available, falling back to CPU")
     
@@ -354,10 +353,9 @@ def process_batch_command(args: argparse.Namespace) -> int:
     
     # Check GPU availability if requested
     if args.use_gpu:
-        has_gpu, gpu_type, _ = detect_gpu()
-        if has_gpu:
-            logger.info(f"Using GPU ({gpu_type}) for processing")
-            optimize_gpu_settings()
+        gpu_info = detect_gpu()
+        if gpu_info["detected"]:
+            logger.info(f"Using GPU ({gpu_info['gpu_type']}) for processing")
         else:
             logger.warning("GPU requested but not available, falling back to CPU")
     
@@ -418,9 +416,9 @@ def extract_scenes_command(args: argparse.Namespace) -> int:
     
     # Check GPU availability if requested
     if args.use_gpu:
-        has_gpu, gpu_type, _ = detect_gpu()
-        if has_gpu:
-            logger.info(f"Using GPU ({gpu_type}) for processing")
+        gpu_info = detect_gpu()
+        if gpu_info["detected"]:
+            logger.info(f"Using GPU ({gpu_info['gpu_type']}) for processing")
         else:
             logger.warning("GPU requested but not available, falling back to CPU")
     
@@ -482,9 +480,9 @@ def extract_frames_command(args: argparse.Namespace) -> int:
     
     # Check GPU availability if requested
     if args.use_gpu:
-        has_gpu, gpu_type, _ = detect_gpu()
-        if has_gpu:
-            logger.info(f"Using GPU ({gpu_type}) for processing")
+        gpu_info = detect_gpu()
+        if gpu_info["detected"]:
+            logger.info(f"Using GPU ({gpu_info['gpu_type']}) for processing")
         else:
             logger.warning("GPU requested but not available, falling back to CPU")
     
@@ -564,15 +562,15 @@ def info_command(args: argparse.Namespace) -> int:
     print(f"Python: {sys.version}")
     
     # GPU information
-    has_gpu, gpu_type, device_count = detect_gpu()
-    if has_gpu:
-        print(f"GPU: {gpu_type} ({device_count} device(s))")
+    gpu_info = detect_gpu()
+    if gpu_info["detected"]:
+        print(f"GPU: {gpu_info['gpu_type']} ({gpu_info['device_count']} device(s))")
     else:
         print("GPU: Not available")
     
-    if args.gpu and has_gpu:
-        if gpu_type == 'cuda':
-            for i in range(device_count):
+    if args.gpu and gpu_info["detected"]:
+        if gpu_info['gpu_type'] == 'cuda':
+            for i in range(gpu_info['device_count']):
                 import torch
                 print(f"  Device {i}: {torch.cuda.get_device_name(i)}")
                 print(f"    Compute Capability: {torch.cuda.get_device_capability(i)}")

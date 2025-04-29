@@ -30,14 +30,32 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 from src.models.schema import Scene, Frame, VideoMetadata
-from src.utils.gpu_utils import get_optimal_device, clear_gpu_memory, memory_stats
+from src.utils.gpu_utils import setup_device, clear_gpu_memory, memory_stats
 from src.video_processing.loader import create_video_capture, extract_frame, save_frame
 
 logger = logging.getLogger(__name__)
 
 # Get the optimal device (GPU if available, otherwise CPU)
-DEVICE = get_optimal_device()
+DEVICE = setup_device()
 
+# Tolerance for timestamp comparison
+TIMESTAMP_TOLERANCE = 0.001  # 1ms tolerance
+
+def _is_timestamp_in_scene(timestamp: float, scene: Scene) -> bool:
+    """
+    Check if a timestamp falls within a scene's time range.
+    
+    Args:
+        timestamp: Timestamp to check
+        scene: Scene object
+        
+    Returns:
+        True if timestamp is in scene, False otherwise
+    """
+    return (
+        scene.start_time - TIMESTAMP_TOLERANCE <= timestamp <= 
+        scene.end_time + TIMESTAMP_TOLERANCE
+    )
 
 class FrameExtractionMethod(str, Enum):
     """Methods for extracting frames from scenes."""
@@ -50,61 +68,36 @@ class FrameExtractionMethod(str, Enum):
     ALL = "all"  # All frames (with sampling)
 
 
-class VideoFrameDataset(Dataset):
-    """Dataset for efficient frame extraction from video."""
+class VideoFrameDataset:
+    """Dataset for loading frames from a video file."""
     
-    def __init__(
-        self,
-        video_path: str,
-        timestamps: Optional[List[float]] = None,
-        frame_indices: Optional[List[int]] = None,
-        transform: Optional[Callable] = None,
-        max_frames: int = 1000
-    ):
+    def __init__(self, video_path: str, frame_indices: List[int], device: str = "cuda"):
         """
         Initialize the dataset.
         
         Args:
             video_path: Path to the video file
-            timestamps: List of timestamps to extract (in seconds)
-            frame_indices: List of frame indices to extract
-            transform: Transform to apply to frames
-            max_frames: Maximum number of frames to extract
+            frame_indices: List of frame indices to load
+            device: Device to load frames to ("cuda" or "cpu")
         """
         self.video_path = video_path
-        self.transform = transform
+        self.frame_indices = sorted(frame_indices)  # Sort to ensure sequential access
+        self.device = device
         
-        # Open video file
-        self.cap = create_video_capture(video_path)
-        if self.cap is None:
+        # Get video info but don't keep the capture object
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
             raise ValueError(f"Failed to open video: {video_path}")
+            
+        self.frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.fps = cap.get(cv2.CAP_PROP_FPS)
+        cap.release()
         
-        # Get video properties
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        self.frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.duration = self.frame_count / self.fps if self.fps > 0 else 0
-        
-        # Determine frames to extract
-        if timestamps is not None:
-            # Convert timestamps to frame indices
-            self.frame_indices = [min(self.frame_count - 1, max(0, int(t * self.fps))) for t in timestamps]
-            self.timestamps = timestamps
-        elif frame_indices is not None:
-            # Use provided frame indices
-            self.frame_indices = [min(self.frame_count - 1, max(0, idx)) for idx in frame_indices]
-            # Convert frame indices to timestamps
-            self.timestamps = [idx / self.fps if self.fps > 0 else 0 for idx in self.frame_indices]
-        else:
-            # Extract all frames (with limit)
-            step = max(1, self.frame_count // max_frames)
-            self.frame_indices = list(range(0, self.frame_count, step))
-            # Convert frame indices to timestamps
-            self.timestamps = [idx / self.fps if self.fps > 0 else 0 for idx in self.frame_indices]
-        
-        logger.debug(f"Created VideoFrameDataset for {video_path} with {len(self.frame_indices)} frames")
+        logger.debug(f"Created VideoFrameDataset for {video_path} with {len(frame_indices)} frames")
     
     def __len__(self) -> int:
-        """Get the number of frames."""
         return len(self.frame_indices)
     
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, float, int]:
@@ -112,43 +105,43 @@ class VideoFrameDataset(Dataset):
         Get a frame by index.
         
         Args:
-            idx: Index of the frame to retrieve
+            idx: Index in the frame_indices list
             
         Returns:
             Tuple containing:
-            - Frame as tensor (C, H, W)
+            - Frame tensor of shape (C, H, W)
             - Timestamp in seconds
             - Frame index
         """
         frame_idx = self.frame_indices[idx]
-        timestamp = self.timestamps[idx]
+        timestamp = frame_idx / self.fps if self.fps > 0 else 0
         
-        # Set position to the frame
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        # Open video and seek to frame
+        cap = cv2.VideoCapture(self.video_path)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         
-        # Read the frame
-        ret, frame = self.cap.read()
+        ret, frame = cap.read()
+        cap.release()
+        
         if not ret:
-            # Return black frame if frame cannot be read
-            frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+            raise ValueError(f"Failed to read frame {frame_idx} from {self.video_path}")
         
-        # Convert to RGB
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Convert BGR to RGB
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # Apply transform if provided
-        if self.transform:
-            frame_rgb = self.transform(frame_rgb)
-        else:
-            # Convert to tensor (H, W, C) -> (C, H, W)
-            frame_rgb = torch.from_numpy(frame_rgb).permute(2, 0, 1).float() / 255.0
+        # Convert to tensor and normalize
+        frame = torch.from_numpy(frame).float()
+        frame = frame.permute(2, 0, 1)  # HWC -> CHW
+        frame = frame / 255.0
         
-        return frame_rgb, timestamp, frame_idx
-    
+        if self.device == "cuda":
+            frame = frame.cuda()
+            
+        return frame, timestamp, frame_idx
+        
     def close(self):
-        """Release resources."""
-        if self.cap is not None:
-            self.cap.release()
-            self.cap = None
+        """No-op close method for compatibility."""
+        pass
 
 
 class FrameExtractor:
@@ -171,7 +164,7 @@ class FrameExtractor:
             num_workers: Number of workers for data loading
         """
         self.batch_size = batch_size
-        self.device = get_optimal_device() if use_gpu else torch.device('cpu')
+        self.device = setup_device() if use_gpu else torch.device('cpu')
         self.use_half_precision = use_half_precision and self.device.type == 'cuda'
         self.num_workers = num_workers
         
@@ -243,8 +236,8 @@ class FrameExtractor:
             # Create dataset
             dataset = VideoFrameDataset(
                 video_path,
-                timestamps=all_timestamps,
-                transform=transform
+                frame_indices=all_timestamps,
+                device=self.device
             )
             
             # Create data loader
@@ -278,9 +271,9 @@ class FrameExtractor:
                     
                     # Find which scene this timestamp belongs to
                     scene_id = None
-                    for sid, timestamps in scene_timestamps.items():
-                        if timestamp in timestamps:
-                            scene_id = sid
+                    for scene in scenes:
+                        if _is_timestamp_in_scene(timestamp, scene):
+                            scene_id = scene.id
                             break
                     
                     if scene_id is None:
@@ -398,7 +391,7 @@ class FrameExtractor:
             dataset = VideoFrameDataset(
                 video_path,
                 frame_indices=frame_indices,
-                transform=transform
+                device=self.device
             )
             
             # Create data loader
@@ -572,7 +565,7 @@ class BatchFrameProcessor:
             max_frames_in_memory: Maximum number of frames to keep in memory
         """
         self.batch_size = batch_size
-        self.device = get_optimal_device() if use_gpu else torch.device('cpu')
+        self.device = setup_device() if use_gpu else torch.device('cpu')
         self.use_half_precision = use_half_precision and self.device.type == 'cuda'
         self.preload_frames = preload_frames
         self.max_frames_in_memory = max_frames_in_memory

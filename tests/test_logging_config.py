@@ -19,7 +19,8 @@ from src.utils.logging_config import (
     get_logger,
     log_processing,
     log_success,
-    log_alert
+    log_alert,
+    remove_all_loguru_handlers
 )
 
 @pytest.fixture
@@ -27,6 +28,11 @@ def temp_log_dir():
     """Create a temporary directory for log files."""
     with tempfile.TemporaryDirectory() as temp_dir:
         yield temp_dir
+
+@pytest.fixture(autouse=True)
+def cleanup_loguru_handlers():
+    yield
+    remove_all_loguru_handlers()
 
 def test_setup_logging(temp_log_dir):
     # Test basic logging setup
