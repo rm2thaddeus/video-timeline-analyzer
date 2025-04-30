@@ -15,6 +15,7 @@ alwaysApply: false
 - All public functions/classes must have docstrings with input/output types and descriptions.
 - Inline comments must explain logic, not just describe code.
 - All scientific/algorithmic choices must be justified in comments or documentation.
+- **If any troubleshooting or debugging step is performed in a file, a detailed reasoning log must be added to the comment section at the start of the file, documenting all troubleshooting steps. This log must be committed and tracked at all times.**
 
 ## 3. Testing & Validation
 - All new code must include unit tests.
@@ -28,17 +29,22 @@ alwaysApply: false
 - No hardcoded paths; use configuration files or environment variables.
 - Sensitive files (e.g., .env) must never be overwritten without explicit user confirmation.
 
-## 5. Git & GitHub Workflow
+## 5. Git & GitHub Workflow (with explicit hand-holding and demonstration)
 - All work must be done in feature branches; no direct commits to main or de-novo.
 - Only working, tested code may be merged.
 - Commit messages must be clear, descriptive, and follow the conventional commits style (e.g., feat:, fix:, docs:, chore:).
 - Pull requests must reference relevant issues and be reviewed before merging.
+- **All Git/GitHub actions (staging, committing, pushing) must be explained step-by-step, with explicit instructions and hand-holding, as the user is not a coder.**
+- **The system must perform all Git/GitHub actions and explain the reasoning for each step, so the user can learn by seeing the process in action.**
+- Whenever the user requests a GitHub or version control action, provide clear, actionable steps, perform the action, and confirm the result.
+- **Always keep track of and stage all proposed changes, except for files that are likely to be one-off scripts. One-off scripts should be removed after execution and not committed.**
 
-## 6. Scientific Rigor & Reproducibility
+## 6. Scientific Rigor & Reproducibility (with DataFrame tracking)
 - All processing steps must be deterministic and parameterized.
 - All parameters and random seeds must be logged and version-controlled.
 - DataFrames and intermediate results must be persisted for reproducibility.
 - All alignment and data fusion logic must be explicitly documented.
+- **Once the DataFrame structure is finalized, it must be version-controlled. All changes to the DataFrame structure must be tracked, documented, and justified, including which pipeline components affect it.**
 
 ## 7. Data Management & Privacy
 - All data must be handled in accordance with privacy and ethical guidelines.
