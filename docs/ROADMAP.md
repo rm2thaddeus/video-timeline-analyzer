@@ -1,6 +1,6 @@
 /*
 📌 Purpose – Defines the phased, documentation-first roadmap for the de-novo branch of the Video Timeline Analyzer.
-🔄 Latest Changes – Added solo developer context, learning/fun focus, and AI/code assistant references.
+🔄 Latest Changes – Marked ingestion module as started; added next step recommendation for scene detection.
 ⚙️ Key Logic – Code development may now begin, following the modular folder structure and project rules.
 📂 Expected File Path – docs/ROADMAP.md
 🧠 Reasoning – Ensures a rigorous, reproducible, and maintainable foundation for future development, now transitioning to implementation, with a focus on solo, AI-assisted scientific coding.
@@ -57,15 +57,15 @@ This roadmap defines the phases and milestones for the de-novo branch, focusing 
 
 ## Phase 4: Codebase Bootstrapping & Initial Development
 
-- [ ] Set up the modular folder structure (see `src/` and subfolders for each pipeline stage)
-- [ ] Begin implementation of core modules:
-    - Ingestion (video/audio loading)
-    - Scene detection
-    - Audio analysis
-    - Visual analysis
-    - Metadata/DataFrame construction
-    - Database (Qdrant) integration
-    - (Optional) UI
+- [x] Set up the modular folder structure (see `src/` and subfolders for each pipeline stage)
+- [x] Begin implementation of core modules:
+    - [x] Ingestion (video/audio loading) – started and tested
+    - [ ] Scene detection
+    - [ ] Audio analysis
+    - [ ] Visual analysis
+    - [ ] Metadata/DataFrame construction
+    - [ ] Database (Qdrant) integration
+    - [ ] (Optional) UI
 - [ ] Write initial unit tests in `tests/`
 - [ ] Ensure all code follows project rules for modularity, documentation, and reproducibility
 - [ ] Commit and push all changes with clear, descriptive messages
@@ -97,5 +97,13 @@ This roadmap defines the phases and milestones for the de-novo branch, focusing 
     - [CLIP and BLIP-2 Models](https://github.com/openai/CLIP), (https://github.com/salesforce/BLIP)
 
 ---
+
+## Next Logical Step
+
+**Implement and test the scene detection module.**
+- Use the frames and metadata produced by the ingestion module.
+- Integrate with PySceneDetect or your chosen scene detection tool.
+- Save scene boundaries and prepare outputs for downstream audio and visual analysis.
+- Document and version-control your progress.
 
 *This roadmap is a living document and will be updated as the project evolves. The documentation- and rule-driven approach is central to all phases and milestones, now transitioning to implementation. Enjoy the journey!* 
