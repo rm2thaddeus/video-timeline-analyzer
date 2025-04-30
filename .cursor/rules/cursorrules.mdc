@@ -3,8 +3,50 @@ description: cursor rules
 globs: .cursorrc.json
 alwaysApply: false
 ---
+# Cursor Project Rules for Video Timeline Analyzer (De-Novo Branch)
 
-# Your rule content
+## 1. Code Structure & Modularity
+- All code must be organized into small, reusable modules.
+- Each module must have a clear, single responsibility.
+- No code duplication; shared logic must be factored into helpers or utilities.
 
-- You can @ files here
-- You can use markdown but dont have to
+## 2. Documentation & Comments
+- Every file must start with a structured comment block (purpose, latest changes, key logic, expected path, reasoning).
+- All public functions/classes must have docstrings with input/output types and descriptions.
+- Inline comments must explain logic, not just describe code.
+- All scientific/algorithmic choices must be justified in comments or documentation.
+
+## 3. Testing & Validation
+- All new code must include unit tests.
+- Tests must be reproducible and not depend on external state.
+- Use pytest as the default testing framework.
+- All code must pass tests before merging.
+
+## 4. Environment & Dependency Management
+- All code must run in a virtual environment (venv or conda).
+- Dependencies must be listed in requirements.txt or environment.yml.
+- No hardcoded paths; use configuration files or environment variables.
+- Sensitive files (e.g., .env) must never be overwritten without explicit user confirmation.
+
+## 5. Git & GitHub Workflow
+- All work must be done in feature branches; no direct commits to main or de-novo.
+- Only working, tested code may be merged.
+- Commit messages must be clear, descriptive, and follow the conventional commits style (e.g., feat:, fix:, docs:, chore:).
+- Pull requests must reference relevant issues and be reviewed before merging.
+
+## 6. Scientific Rigor & Reproducibility
+- All processing steps must be deterministic and parameterized.
+- All parameters and random seeds must be logged and version-controlled.
+- DataFrames and intermediate results must be persisted for reproducibility.
+- All alignment and data fusion logic must be explicitly documented.
+
+## 7. Data Management & Privacy
+- All data must be handled in accordance with privacy and ethical guidelines.
+- No personal or sensitive data may be committed to the repository.
+- Data exports must be anonymized or stripped of sensitive information.
+
+## 8. Rule Evolution
+- Project rules must be reviewed and updated at the start of each major phase.
+- All rule changes must be documented and approved by project stakeholders.
+
+# End of Cursor Project Rules

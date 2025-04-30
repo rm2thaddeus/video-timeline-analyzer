@@ -1,75 +1,65 @@
 /*
-📌 Purpose – Outlines the phased development plan for the Video Timeline Analyzer, centered on the variable-granularity DataFrame and reproducible metadata alignment.
-🔄 Latest Changes – Initial creation for the de-novo branch, reflecting the new architecture and scientific best practices.
-⚙️ Key Logic – Defines project phases, milestones, and review points, with a focus on modular pipeline development, metadata alignment, and reproducibility.
+📌 Purpose – Defines the phased, documentation-first roadmap for the de-novo branch of the Video Timeline Analyzer.
+🔄 Latest Changes – Rewritten for a clean start, focusing on design, documentation, and project rules.
+⚙️ Key Logic – No code will be added until all design, documentation, and rules are finalized and reviewed.
 📂 Expected File Path – docs/ROADMAP.md
-🧠 Reasoning – Ensures structured, transparent, and reproducible project progression, with the DataFrame as the canonical metadata source.
+🧠 Reasoning – Ensures a rigorous, reproducible, and maintainable foundation for future development.
 */
 
 # Project Roadmap (De-Novo Branch)
 
 ## Overview
 
-This roadmap defines the major phases, milestones, and review points for the Video Timeline Analyzer, with a focus on the variable-granularity DataFrame as the central metadata structure. All pipeline outputs are parsed and aligned into this DataFrame, which is then used for Qdrant ingestion and downstream analysis.
+This roadmap defines the phases and milestones for the de-novo branch, focusing on documentation, design, and project rule creation.  
+**No code will be added until all planning and rules are finalized and approved.**
 
 ---
 
-## Phase 1: Documentation & Planning
-- [ ] Finalize system architecture ([ARCHITECTURE.md](ARCHITECTURE.md)), emphasizing the DataFrame-centric design
-- [ ] Complete technical specifications ([SPECIFICATIONS.md](SPECIFICATIONS.md))
-- [ ] Define development and environment setup ([DEVELOPMENT_SETUP.md](DEVELOPMENT_SETUP.md))
-- [ ] Establish contribution and review guidelines ([DEVELOPMENT.md](DEVELOPMENT.md))
-- [ ] Review and approve all documentation
+## Phase 1: Documentation & Design
+
+- [ ] Review and refine system architecture ([ARCHITECTURE.md](ARCHITECTURE.md)), emphasizing the DataFrame-centric, variable-granularity approach.
+- [ ] Complete technical specifications ([SPECIFICATIONS.md](SPECIFICATIONS.md)), including data models and alignment logic.
+- [ ] Finalize development environment and setup documentation ([DEVELOPMENT_SETUP.md](DEVELOPMENT_SETUP.md)).
+- [ ] Review and update all supporting documentation (e.g., [POWERSHELL_COMMANDS.md](POWERSHELL_COMMANDS.md), [DEVELOPMENT.md](DEVELOPMENT.md)).
+- [ ] Document all scientific and reproducibility requirements.
 
 **Milestone:** All documentation reviewed and approved by project stakeholders.
 
 ---
 
-## Phase 2: Modular Pipeline Implementation
-- [ ] Implement scene detection module (parameterized, reproducible)
-- [ ] Implement audio extraction and transcription module (Whisper, parameterized segment length)
-- [ ] Implement key frame extraction and image embedding module (CLIP or similar)
-- [ ] Validate each module independently with test videos
+## Phase 2: Project Rule Creation
 
-**Milestone:** All core modules implemented and tested in isolation.
+- [ ] Draft comprehensive Cursor project rules (see `.cursor/rules/cursorrules.mdc`).
+- [ ] Review and refine rules for:
+    - Code structure and modularity
+    - Documentation and commenting standards
+    - Testing and validation requirements
+    - Environment and dependency management
+    - Git/GitHub workflow and commit policies
+    - Scientific rigor and reproducibility
+    - Data management and privacy
+- [ ] Approve and publish rules in the repository.
 
----
-
-## Phase 3: Metadata Alignment & DataFrame Construction
-- [ ] Design and implement alignment logic for variable-granularity metadata (scenes, frames, transcripts)
-- [ ] Build canonical DataFrame structure (one row per scene, lists for variable fields)
-- [ ] Parameterize and document all alignment steps
-- [ ] Persist DataFrame (e.g., Parquet) for reproducibility
-- [ ] Validate DataFrame content and alignment with test cases
-
-**Milestone:** Canonical DataFrame construction and validation complete.
+**Milestone:** Project rules finalized and published.
 
 ---
 
-## Phase 4: Qdrant Integration & Querying
-- [ ] Implement Qdrant ingestion (multi-vector support, full payloads)
-- [ ] Validate round-trip querying (text, image, metadata)
-- [ ] Document Qdrant schema and ingestion process
+## Phase 3: Review & Planning for Implementation
 
-**Milestone:** Qdrant collection populated and queryable with all metadata.
+- [ ] Hold review meeting(s) to ensure all documentation and rules are clear, complete, and actionable.
+- [ ] Identify any gaps or ambiguities in the design or rules.
+- [ ] Plan the transition to implementation (future phases to be defined after review).
 
----
-
-## Phase 5: Scientific Validation & Extensibility
-- [ ] Benchmark pipeline reproducibility and performance
-- [ ] Add support for additional metadata fields (tags, scores, etc.) as needed
-- [ ] Document all parameters, random seeds, and alignment logic
-- [ ] Prepare for publication, sharing, or further extension (e.g., plugin system, distributed processing)
-
-**Milestone:** System meets scientific standards for reproducibility, extensibility, and documentation.
+**Milestone:** Project is ready for codebase bootstrapping, with a clear, documented, and rule-driven foundation.
 
 ---
 
 ## Review & Feedback
-- Regular review meetings at the end of each phase
-- Issues and suggestions tracked via GitHub
-- All major decisions documented for reproducibility
+
+- Regular review meetings at the end of each phase.
+- Issues and suggestions tracked via GitHub.
+- All major decisions documented for reproducibility.
 
 ---
 
-*This roadmap is a living document and will be updated as the project evolves. The DataFrame-centric, variable-granularity approach is central to all phases and milestones.* 
+*This roadmap is a living document and will be updated as the project evolves. The documentation- and rule-driven approach is central to all phases and milestones.* 
