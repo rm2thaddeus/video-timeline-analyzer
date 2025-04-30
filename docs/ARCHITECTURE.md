@@ -1,220 +1,124 @@
+/*
+📌 Purpose – Defines the modular, reproducible system architecture for the Video Timeline Analyzer, with a focus on variable-granularity metadata alignment.
+🔄 Latest Changes – Added explicit centrality of the metadata DataFrame, clarified pipeline output parsing/alignment, and emphasized reproducibility and parameterization.
+⚙️ Key Logic – All pipeline outputs are parsed and aligned into a variable-granularity DataFrame, which is the canonical source for Qdrant ingestion and downstream analysis.
+📂 Expected File Path – docs/ARCHITECTURE.md
+🧠 Reasoning – Ensures maintainability, extensibility, and reproducibility for scientific video analysis by making the DataFrame the central, queryable structure.
+*/
+
 # Video Timeline Analyzer: System Architecture
 
-This document outlines the architectural design of the Video Timeline Analyzer, explaining component interactions, data flows, and technical decisions.
+## 1. Overview
 
-## 1. System Overview
+The Video Timeline Analyzer is a modular, pipeline-oriented application for extracting rich, interpretable metadata from video files and presenting it via an interactive timeline. The central architectural principle is the use of a variable-granularity metadata DataFrame, which aggregates and aligns all outputs from the analysis pipelines (scene detection, audio transcription, frame extraction, embeddings, etc.). This DataFrame is the canonical, queryable structure for all downstream tasks, including vector database (Qdrant) ingestion.
 
-The Video Timeline Analyzer is designed as a modular, pipeline-oriented application that processes video content through several sequential and parallel analysis steps to generate rich metadata and an interactive timeline interface.
+---
 
-### 1.1 Key Architectural Principles
+## 2. Architectural Principles
 
-- **Modularity**: Each component is self-contained with clear interfaces
-- **Parallelization**: CPU and GPU-intensive tasks run concurrently when possible
-- **Resilience**: Fallback mechanisms for all critical components
-- **Extensibility**: Plugin-like architecture for adding new analyzers or UI components
-- **Efficiency**: Smart caching and processing to handle large video files
+- **Modularity:** Each component is self-contained with well-defined interfaces.
+- **Reproducibility:** All processing steps are deterministic, parameterized, and documented. The DataFrame is persisted for reproducibility.
+- **Variable Granularity:** Metadata fields may apply globally, per scene, per frame, or per transcript segment. The DataFrame is designed to flexibly accommodate this.
+- **Alignment Logic:** All pipeline outputs are parsed and aligned into the DataFrame, with explicit logic for handling overlaps and variable segmentations.
+- **Extensibility:** New analysis modules and metadata fields can be added as needed.
+- **Efficiency:** Parallelization and caching for large-scale video processing.
+- **Resilience:** Fallbacks for critical steps; robust error handling.
 
-### 1.2 High-Level Architecture Diagram
+---
+
+## 3. High-Level Architecture
 
 ```
 +------------------+    +---------------------+    +----------------+
-| Video Ingestion  | -> | Analysis Pipeline   | -> | Data Storage   |
-+------------------+    +---------------------+    +----------------+
+| Video Ingestion  | -> | Analysis Pipelines  | -> | Metadata       |
++------------------+    +---------------------+    | DataFrame      |
+                         |                |         +----------------+
+                         v                v                |
+                    +-----------+   +-----------+          |
+                    | Audio     |   | Visual    |          |
+                    | Pipeline  |   | Pipeline  |          |
+                    +-----------+   +-----------+          |
                          |                |                |
-                         v                v                v
-                    +-----------+   +-----------+   +--------------+
-                    | Audio     |   | Visual    |   | Interactive  |
-                    | Pipeline  |   | Pipeline  |   | Timeline UI  |
-                    +-----------+   +-----------+   +--------------+
+                         +----------------+                |
+                                  |                        |
+                                  v                        v
+                            +-------------------------------+
+                            |   Qdrant Vector Database      |
+                            +-------------------------------+
 ```
 
-## 2. Core Components
+---
 
-### 2.1 Video Ingestion & Pre-Processing
+## 4. Core Components
 
-**Purpose**: Handle video file loading, initial decoding, and preparation for analysis.
+### 4.1 Video Ingestion & Pre-Processing
+- **Purpose:** Load video, extract frames/audio, and basic metadata.
+- **Technologies:** FFmpeg (video/audio extraction), OpenCV (frame handling)
 
-**Key Components**:
-- Video file parser and decoder
-- Frame extractor
-- Audio stream separator
-- Video metadata extractor (resolution, framerate, duration)
+### 4.2 Scene Detection
+- **Purpose:** Segment video into scenes for timeline structure.
+- **Technologies:** PySceneDetect (primary), OpenCV (fallback)
 
-**Technologies**:
-- FFmpeg for decoding and extraction
-- OpenCV for initial frame handling
-- PyAV for advanced stream manipulation
+### 4.3 Audio Analysis Pipeline
+- **Purpose:** Extract and analyze audio for speech, sentiment, and events.
+- **Technologies:** OpenAI Whisper (transcription), Hugging Face Transformers (sentiment), librosa (audio features)
 
-### 2.2 Scene Change Detection
+### 4.4 Visual Analysis Pipeline
+- **Purpose:** Extract semantic and emotional context from frames.
+- **Technologies:** CLIP (embeddings/tags), BLIP-2 (captioning), DeepFace (facial emotion)
 
-**Purpose**: Identify distinct scenes within the video to establish timeline segments.
+### 4.5 Metadata DataFrame Construction (Central Step)
+- **Purpose:** Parse and align all pipeline outputs (scenes, transcripts, frames, embeddings, etc.) into a single DataFrame with variable granularity.
+- **Logic:**
+    - Each row = one scene (primary unit)
+    - Columns for global, scene, frame, and transcript-segment metadata
+    - Lists/arrays for variable-length fields (e.g., key frames, transcript segments)
+    - Alignment logic is parameterized and documented
+    - DataFrame is persisted (e.g., Parquet) for reproducibility
 
-**Key Components**:
-- Content-aware scene detector
-- Threshold-based scene detector
-- Scene boundary refiner
-- Key frame selector
+### 4.6 Qdrant Vector Database Integration
+- **Purpose:** Store each scene as a point in Qdrant, with multi-vector support (text/image embeddings) and all other metadata as payload.
+- **Technologies:** Qdrant (vector DB), pandas (DataFrame handling)
 
-**Technologies**:
-- PySceneDetect as primary tool
-- OpenCV histogram comparison as fallback
-- Custom boundary refinement algorithms
+### 4.7 Interactive Timeline UI (Optional)
+- **Purpose:** Visualize video, scenes, and metadata for exploration.
+- **Technologies:** PyQt5 (desktop), FastAPI (web, optional)
 
-### 2.3 Audio Analysis Pipeline
+---
 
-**Purpose**: Extract and analyze the audio track for speech, emotion, and notable audio events.
+## 5. Data Flow
 
-**Key Components**:
-- Speech-to-text transcription
-- Sentiment analysis of text
-- Speaker diarization (optional)
-- Audio feature extraction
-- Audio emotion classifier
+1. **Video Input:** Load video, extract frames/audio, and metadata.
+2. **Scene Detection:** Segment into scenes.
+3. **Parallel Processing:**
+   - **Audio:** Transcribe, analyze sentiment, extract features.
+   - **Visual:** Extract key frames, generate captions/tags, analyze faces.
+4. **Metadata Alignment:** Parse and align all outputs into the variable-granularity DataFrame.
+5. **Qdrant Ingestion:** Store each scene as a point with multi-vector embeddings and full payload.
+6. **UI (Optional):** Render interactive timeline.
 
-**Technologies**:
-- OpenAI Whisper for transcription
-- WhisperX for word-level timing
-- Hugging Face Transformers for sentiment analysis
-- pyAudioAnalysis/librosa for audio features
-- Custom models for audio emotion and event detection
+---
 
-### 2.4 Visual Analysis Pipeline
+## 6. Reproducibility & Parameterization
+- All steps are parameterized (scene detection sensitivity, frame extraction rate, transcript segment length, etc.)
+- All parameters and random seeds are logged and version-controlled
+- The DataFrame is persisted for reproducibility
+- Alignment logic is explicitly documented
 
-**Purpose**: Extract semantic information, emotions, and context from video frames.
+---
 
-**Key Components**:
-- Scene content analyzer
-- Frame captioning
-- Facial detection and emotion recognition
-- Visual embedding generator
-- Scene tagger
+## 7. Extensibility & Future Work
+- Plugin system for new analyzers and metadata fields (planned)
+- Distributed/cloud processing (future)
+- Mobile/web UI (optional)
 
-**Technologies**:
-- CLIP for visual embeddings and tagging
-- BLIP-2 for caption generation
-- DeepFace for facial emotion analysis
-- Potential custom models for domain-specific detection
+---
 
-### 2.5 Data Fusion & Scoring
+## 8. References
+- [Technical Specifications](SPECIFICATIONS.md)
+- [Development Setup](DEVELOPMENT_SETUP.md)
+- [Project Roadmap](ROADMAP.md)
 
-**Purpose**: Combine signals from audio and visual pipelines to produce composite metadata and scores.
+---
 
-**Key Components**:
-- Metadata aligner (time synchronization)
-- "Viral" moment detector
-- Weighted scoring algorithm
-- Feature fusion model
-
-**Technologies**:
-- Custom scoring algorithms
-- Time-series analysis tools
-- Weighted fusion methods
-
-### 2.6 Data Storage & Retrieval
-
-**Purpose**: Store, index, and efficiently retrieve all generated metadata.
-
-**Key Components**:
-- Relational database for structured metadata
-- JSON serialization for export/import
-- Vector database for semantic search
-- Caching system for frequent queries
-
-**Technologies**:
-- SQLite for primary storage
-- JSON for data interchange
-- FAISS or ChromaDB for vector search
-- Custom caching layer
-
-### 2.7 Interactive Timeline UI
-
-**Purpose**: Provide a user-friendly interface for exploring the video through the generated metadata.
-
-**Key Components**:
-- Video player with controls
-- Timeline visualization with markers
-- Subtitle overlay system
-- Metadata display panel
-- Navigation controls
-- Search functionality
-
-**Technologies**:
-- Desktop: PyQt5 or Tkinter
-- Web: FastAPI backend with JavaScript frontend
-- Visualization libraries for timeline rendering
-
-## 3. Data Flow
-
-### 3.1 Processing Pipeline
-
-1. **Video Input** → Parse video file and extract basic metadata
-2. **Scene Detection** → Segment video into distinct scenes
-3. **Parallel Processing**:
-   - **Audio Pipeline**: Extract audio → Transcribe → Analyze sentiment → Detect audio events
-   - **Visual Pipeline**: Extract key frames → Generate captions → Detect faces → Analyze emotions → Create embeddings
-4. **Data Fusion**: Combine audio and visual metadata, synchronize by timestamp
-5. **Scoring**: Calculate "viral" score for each scene based on combined signals
-6. **Storage**: Save all metadata to database with appropriate indexing
-7. **UI Rendering**: Generate interactive timeline with all metadata displayed
-
-### 3.2 Data Schema
-
-The central data model revolves around Scene objects with associated metadata:
-
-```python
-class Scene:
-    start_time: float  # In seconds
-    end_time: float
-    key_frames: List[Frame]
-    transcript: List[TranscriptSegment]
-    context_tags: List[str]
-    captions: List[str]
-    sentiment_score: float
-    facial_emotions: Dict[str, float]  # emotion -> intensity
-    audio_features: Dict[str, float]  # feature -> value
-    viral_score: float
-    embeddings: Dict[str, List[float]]  # embedding_type -> vector
-```
-
-## 4. Technical Considerations
-
-### 4.1 GPU Utilization
-
-- Deep learning models (CLIP, BLIP-2, Whisper, DeepFace) will leverage GPU acceleration
-- Parallel processing will be optimized for GPU utilization
-- Memory management considerations for large videos
-- Fallback to CPU processing when GPU is unavailable
-
-### 4.2 Performance Optimization
-
-- Adaptive processing based on video length and complexity
-- Progressive loading for UI components
-- Caching of intermediate results
-- Batch processing where applicable
-- Downsampling for initial analysis with refinement options
-
-### 4.3 Extensibility
-
-- Plugin architecture for adding new analyzers
-- Custom scoring algorithms can be defined
-- UI themes and layouts can be customized
-- Export formats can be extended
-
-### 4.4 Error Handling & Resilience
-
-- Each component includes fallback mechanisms
-- Graceful degradation when specific analyses fail
-- Comprehensive logging system
-- Recovery options for interrupted processing
-
-## 5. Implementation Plan
-
-The implementation will follow the phased approach outlined in the project roadmap, with core infrastructure developed first, followed by individual analysis components, and finally the UI and integration layer.
-
-## 6. Future Architectural Considerations
-
-- Distributed processing for very large videos
-- Cloud-based deployment options
-- Real-time analysis capabilities
-- API for third-party integration
-- Mobile-friendly architecture
+*This architecture ensures that all metadata is centrally aligned and queryable, supporting flexible, reproducible, and extensible scientific video analysis.*
