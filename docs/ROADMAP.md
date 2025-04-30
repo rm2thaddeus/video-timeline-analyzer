@@ -1,9 +1,9 @@
 /*
 📌 Purpose – Defines the phased, documentation-first roadmap for the de-novo branch of the Video Timeline Analyzer.
-🔄 Latest Changes – Updated to mark documentation and rules as complete; added codebase bootstrapping and initial development phase.
+🔄 Latest Changes – Added solo developer context, learning/fun focus, and AI/code assistant references.
 ⚙️ Key Logic – Code development may now begin, following the modular folder structure and project rules.
 📂 Expected File Path – docs/ROADMAP.md
-🧠 Reasoning – Ensures a rigorous, reproducible, and maintainable foundation for future development, now transitioning to implementation.
+🧠 Reasoning – Ensures a rigorous, reproducible, and maintainable foundation for future development, now transitioning to implementation, with a focus on solo, AI-assisted scientific coding.
 */
 
 # Project Roadmap (De-Novo Branch)
@@ -11,6 +11,8 @@
 ## Overview
 
 This roadmap defines the phases and milestones for the de-novo branch, focusing on documentation, design, project rule creation, and now codebase bootstrapping and initial development.
+
+**Note:** This project is being developed by a single scientist-developer, with a focus on learning, fun, and leveraging AI/code assistants to minimize manual coding. The process is designed to be enjoyable and educational, not just productive.
 
 ---
 
@@ -74,10 +76,26 @@ This roadmap defines the phases and milestones for the de-novo branch, focusing 
 
 ## Review & Feedback
 
-- Regular review meetings at the end of each phase.
+- Regular review meetings at the end of each phase (self-review or with AI assistant).
 - Issues and suggestions tracked via GitHub.
 - All major decisions documented for reproducibility.
 
 ---
 
-*This roadmap is a living document and will be updated as the project evolves. The documentation- and rule-driven approach is central to all phases and milestones, now transitioning to implementation.* 
+## Tips & References for Solo, AI-Assisted Scientific Development
+
+- **Leverage AI/code assistants** (like Cursor, Copilot, or ChatGPT) for code generation, refactoring, and documentation.
+- **Keep learning fun:** Try new tools, experiment, and don't be afraid to iterate or refactor.
+- **Document your process:** Use README files, comments, and commit messages to track your learning and decisions.
+- **Useful resources:**
+    - [The Turing Way: Guide to Reproducible Research](https://the-turing-way.netlify.app/)
+    - [Software Carpentry: Scientific Programming Best Practices](https://software-carpentry.org/lessons/)
+    - [GitHub Guides: Mastering Markdown](https://guides.github.com/features/mastering-markdown/)
+    - [Qdrant Documentation](https://qdrant.tech/documentation/)
+    - [PySceneDetect Documentation](https://pyscenedetect.readthedocs.io/en/latest/)
+    - [OpenAI Whisper](https://github.com/openai/whisper)
+    - [CLIP and BLIP-2 Models](https://github.com/openai/CLIP), (https://github.com/salesforce/BLIP)
+
+---
+
+*This roadmap is a living document and will be updated as the project evolves. The documentation- and rule-driven approach is central to all phases and milestones, now transitioning to implementation. Enjoy the journey!* 
