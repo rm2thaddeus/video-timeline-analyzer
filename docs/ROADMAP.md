@@ -183,10 +183,14 @@ To ensure full GPU acceleration, reproducibility, and access to the latest scien
 
 ## Next Logical Step
 
-**Implement and test the modular scene detection backend.**
-- Automatically select TransNet V2 if CUDA is available, else use PySceneDetect.
-- Use the frames and metadata produced by the ingestion module.
-- Save scene boundaries and prepare outputs for downstream audio and visual analysis.
-- Document and version-control your progress.
+**Ensure Cursor and Code Assistant Plugins Operate in WSL2**
+- To guarantee all code generation, automation, and AI-assisted development occurs in the correct (GPU-accelerated, Linux-native) environment, make sure Cursor and any code assistant plugins are running in your WSL2 shell.
+- **How to do this:**
+  - Open your project folder in VSCode or Cursor using the "Remote - WSL" extension (or equivalent for your editor).
+  - Confirm that the integrated terminal and all code execution are happening in the Ubuntu/WSL2 environment (you should see your Linux username and home directory in the prompt, e.g., `aitor@AitorMSI:~`).
+  - If using plugins, ensure they are enabled and configured for the WSL2 context.
+- This step is essential for reproducibility, full GPU acceleration, and seamless scientific development.
+
+*This step ensures that all future development, automation, and troubleshooting are performed in the intended environment, maximizing reliability and scientific rigor.*
 
 *This roadmap is a living document and will be updated as the project evolves. The backend-first, documentation- and rule-driven approach is central to all phases and milestones. Enjoy the journey!* 
