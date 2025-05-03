@@ -58,4 +58,10 @@ A GitHub Actions workflow has been configured to run tests and enforce code qual
 For detailed architecture and future roadmap details, refer to:
 
 - [Architecture](ARCHITECTURE.md)
-- [Roadmap](ROADMAP.md) 
+- [Roadmap](ROADMAP.md)
+
+> **GPU Compatibility Note:**  
+> For full GPU acceleration of both TensorFlow (scene detection) and PyTorch-based models (Whisper, embeddings), you must use:
+> - TensorFlow 2.10.0 (last Windows GPU version) with CUDA 11.2 and cuDNN 8.1, and a compatible PyTorch (e.g., 1.12.1+cu112).
+> - Or, for the latest TensorFlow and PyTorch GPU support, use WSL2 + Ubuntu, which allows both frameworks to use the latest CUDA stack.
+> See the [Roadmap](ROADMAP.md) for details and troubleshooting. 

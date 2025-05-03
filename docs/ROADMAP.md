@@ -1,18 +1,46 @@
 /*
 📌 Purpose – Defines the phased, documentation-first roadmap for the de-novo branch of the Video Timeline Analyzer.
-🔄 Latest Changes – Marked ingestion module as started; added next step recommendation for scene detection.
-⚙️ Key Logic – Code development may now begin, following the modular folder structure and project rules.
+🔄 Latest Changes – Clarified backend-only focus; emphasized modular, pipeline-oriented backend and automatic scene detection selection.
+⚙️ Key Logic – Backend development is prioritized, with modular scene detection (TransNet V2 if CUDA, else PySceneDetect).
 📂 Expected File Path – docs/ROADMAP.md
-🧠 Reasoning – Ensures a rigorous, reproducible, and maintainable foundation for future development, now transitioning to implementation, with a focus on solo, AI-assisted scientific coding.
+🧠 Reasoning – Ensures a rigorous, reproducible, and maintainable backend foundation before any UI work.
 */
 
 # Project Roadmap (De-Novo Branch)
 
 ## Overview
 
-This roadmap defines the phases and milestones for the de-novo branch, focusing on documentation, design, project rule creation, and now codebase bootstrapping and initial development.
+This roadmap defines the phases and milestones for the de-novo branch, focusing on backend development only (no UI yet). The goal is a modular, pipeline-oriented backend for scientific video analysis, with automatic selection of the best scene detection method (TransNet V2 if CUDA is available, else PySceneDetect).
 
 **Note:** This project is being developed by a single scientist-developer, with a focus on learning, fun, and leveraging AI/code assistants to minimize manual coding. The process is designed to be enjoyable and educational, not just productive.
+
+## Hardware Acceleration (TensorFlow/CUDA) Status
+
+- **Current State:**
+  - TensorFlow 2.19.0 is installed, but does not support GPU on Windows (only CPU is used).
+  - CUDA Toolkit 12.8 is installed, but TensorFlow GPU support on Windows requires CUDA 11.2 and cuDNN 8.1.
+  - Diagnostic scripts confirm: TensorFlow is not built with CUDA, no GPUs are detected, and CUDA/cuDNN are not available to TensorFlow.
+
+- **Why:**
+  - TensorFlow dropped native Windows GPU support after version 2.10.0. Newer versions (2.11+) are CPU-only on Windows.
+  - TensorFlow is strict about CUDA/cuDNN versions; mismatches result in no GPU usage.
+
+- **Recommended Solutions:**
+  1. **For Windows Native GPU Support:**
+     - Uninstall CUDA 12.8 and install CUDA 11.2 + cuDNN 8.1.
+     - Downgrade TensorFlow to 2.10.0 (`pip install tensorflow==2.10.0`).
+     - Add CUDA and cuDNN `bin` directories to system PATH.
+  2. **For Latest TensorFlow GPU Support:**
+     - Use WSL2 + Ubuntu, install latest TensorFlow and CUDA inside WSL2.
+
+- **Action Items:**
+  - Decide on native Windows vs. WSL2 approach for future development.
+  - Update documentation and onboarding instructions accordingly.
+
+- **Pipeline Compatibility Note:**
+  - PyTorch (for Whisper and embedding models) is more flexible with CUDA versions than TensorFlow.
+  - For full GPU acceleration on native Windows, use PyTorch 1.12.1+cu112 with CUDA 11.2.
+  - For the latest PyTorch and TensorFlow, use WSL2 + Ubuntu.
 
 ---
 
@@ -55,22 +83,21 @@ This roadmap defines the phases and milestones for the de-novo branch, focusing 
 
 ---
 
-## Phase 4: Codebase Bootstrapping & Initial Development
+## Phase 4: Backend Bootstrapping & Initial Development
 
 - [x] Set up the modular folder structure (see `src/` and subfolders for each pipeline stage)
-- [x] Begin implementation of core modules:
+- [x] Begin implementation of core backend modules:
     - [x] Ingestion (video/audio loading) – started and tested
-    - [ ] Scene detection
+    - [ ] Scene detection (automatic: TransNet V2 if CUDA, else PySceneDetect)
     - [ ] Audio analysis
     - [ ] Visual analysis
     - [ ] Metadata/DataFrame construction
     - [ ] Database (Qdrant) integration
-    - [ ] (Optional) UI
 - [ ] Write initial unit tests in `tests/`
 - [ ] Ensure all code follows project rules for modularity, documentation, and reproducibility
 - [ ] Commit and push all changes with clear, descriptive messages
 
-**Milestone:** Core modules bootstrapped and under version control, ready for iterative development.
+**Milestone:** Core backend modules bootstrapped and under version control, ready for iterative development.
 
 ---
 
@@ -93,6 +120,7 @@ This roadmap defines the phases and milestones for the de-novo branch, focusing 
     - [GitHub Guides: Mastering Markdown](https://guides.github.com/features/mastering-markdown/)
     - [Qdrant Documentation](https://qdrant.tech/documentation/)
     - [PySceneDetect Documentation](https://pyscenedetect.readthedocs.io/en/latest/)
+    - [TransNet V2 (Shot Boundary Detection)](https://github.com/soCzech/TransNetV2)
     - [OpenAI Whisper](https://github.com/openai/whisper)
     - [CLIP and BLIP-2 Models](https://github.com/openai/CLIP), (https://github.com/salesforce/BLIP)
 
@@ -100,10 +128,10 @@ This roadmap defines the phases and milestones for the de-novo branch, focusing 
 
 ## Next Logical Step
 
-**Implement and test the scene detection module.**
+**Implement and test the modular scene detection backend.**
+- Automatically select TransNet V2 if CUDA is available, else use PySceneDetect.
 - Use the frames and metadata produced by the ingestion module.
-- Integrate with PySceneDetect or your chosen scene detection tool.
 - Save scene boundaries and prepare outputs for downstream audio and visual analysis.
 - Document and version-control your progress.
 
-*This roadmap is a living document and will be updated as the project evolves. The documentation- and rule-driven approach is central to all phases and milestones, now transitioning to implementation. Enjoy the journey!* 
+*This roadmap is a living document and will be updated as the project evolves. The backend-first, documentation- and rule-driven approach is central to all phases and milestones. Enjoy the journey!* 

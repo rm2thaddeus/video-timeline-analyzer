@@ -48,6 +48,20 @@ def detect_scenes_transnetv2(video_path, output_dir, **kwargs):
     # Add the inference directory to sys.path
     sys.path.append(os.path.join(os.path.dirname(__file__), "transnetv2_repo", "inference"))
     from transnetv2 import TransNetV2
+    import tensorflow as tf
+
+    # Robust GPU check
+    gpus = tf.config.list_physical_devices('GPU')
+    if not gpus:
+        print("[ERROR] TensorFlow does not detect a GPU.\n" \
+              "- Ensure you have installed tensorflow-gpu (or the correct version of tensorflow).\n" \
+              "- Check that your CUDA and cuDNN versions match TensorFlow's requirements.\n" \
+              "- See: https://www.tensorflow.org/install/gpu\n" \
+              "- The pipeline will run on CPU, which may be much slower.")
+        # Optionally, raise an error to enforce GPU usage:
+        # raise RuntimeError("TensorFlow GPU not detected. Aborting for reproducibility.")
+    else:
+        print(f"[INFO] TensorFlow detected {len(gpus)} GPU(s): {[gpu.name for gpu in gpus]}")
 
     # Load model (weights are downloaded automatically by TransNetV2)
     model = TransNetV2()
