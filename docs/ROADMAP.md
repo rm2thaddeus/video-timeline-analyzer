@@ -44,6 +44,61 @@ This roadmap defines the phases and milestones for the de-novo branch, focusing 
 
 ---
 
+## Developing in WSL2 + Ubuntu: Best Practices & Workflow
+
+To ensure full GPU acceleration, reproducibility, and access to the latest scientific Python tools, all backend development should be performed inside the WSL2 Ubuntu environment. Follow these guidelines for a seamless workflow:
+
+### 1. Launching Your WSL2 Development Environment
+- Open Ubuntu from the Start Menu, or run `wsl.exe -d Ubuntu` in PowerShell.
+- (Recommended) Open your project folder in VSCode or Cursor using the "Remote - WSL" extension for a native Linux development experience with full AI/code assistant support.
+
+### 2. Project Location & File Access
+- **Preferred:** Clone your repository inside your Ubuntu home directory (e.g., `~/video-timeline-analyzer`).
+- **Alternative:** Access your Windows files from `/mnt/c/Users/<your-username>/Video_Timeline`, but note that performance and compatibility are best when working in the Linux filesystem.
+
+### 3. Python Environment Management
+- Always use a Python virtual environment (`venv`) for all development:
+  ```bash
+  python3 -m venv venv
+  source venv/bin/activate
+  pip install --upgrade pip
+  pip install -r requirements.txt
+  ```
+- Install all dependencies inside the venv. For GPU support, install the latest TensorFlow and PyTorch (these are WSL2-compatible by default).
+
+### 4. GPU & CUDA Verification
+- Confirm GPU access with:
+  ```bash
+  python -c "import tensorflow as tf; print('TF GPUs:', tf.config.list_physical_devices('GPU'))"
+  python -c "import torch; print('Torch CUDA available:', torch.cuda.is_available())"
+  nvidia-smi
+  ```
+- If you see your GPU listed, you are ready for accelerated development.
+
+### 5. Using AI/Code Assistants
+- AI/code assistants (Cursor, Copilot, ChatGPT, etc.) work seamlessly in VSCode/Cursor via WSL2.
+- All code generation, refactoring, and automation should be performed in the WSL2 environment for consistency.
+
+### 6. Git & Version Control
+- Use `git` inside Ubuntu for all commits, branching, and pushes.
+- Ensure all changes are staged and committed from within WSL2 to avoid line ending or permission issues.
+
+### 7. Troubleshooting & Documentation
+- Record your environment details (TensorFlow, PyTorch, CUDA versions) in `docs/ENVIRONMENT.md` for reproducibility.
+- Suppress TensorFlow log spam by adding `os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"` at the top of your scripts if desired.
+
+### 8. Summary Table
+| Task Type                | Where to Run?         | Notes                         |
+|--------------------------|-----------------------|-------------------------------|
+| Backend Python code      | WSL2 (Ubuntu)         | Full GPU, best practice       |
+| CUDA/TensorFlow/PyTorch  | WSL2 (Ubuntu)         | Required for GPU support      |
+| File access (project)    | WSL2 recommended      | Use Linux FS for best results |
+| Git/version control      | WSL2 (Ubuntu)         | Avoids Windows/Unix issues    |
+
+> **All backend, scientific, and GPU-accelerated work should be done in WSL2 Ubuntu for maximum compatibility, performance, and reproducibility.**
+
+---
+
 ## Phase 1: Documentation & Design
 
 - [x] Review and refine system architecture ([ARCHITECTURE.md](ARCHITECTURE.md)), emphasizing the DataFrame-centric, variable-granularity approach.
