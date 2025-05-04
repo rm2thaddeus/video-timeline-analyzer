@@ -4,6 +4,14 @@
 ⚙️ Key Logic – Backend development is prioritized, with modular scene detection (TransNet V2 if CUDA, else PySceneDetect).
 📂 Expected File Path – docs/ROADMAP.md
 🧠 Reasoning – Ensures a rigorous, reproducible, and maintainable backend foundation before any UI work.
+
+---
+
+🚩 **Future Task: Windows Compatibility**
+- Plan to set up and test the same pipeline (PyTorch TransNetV2, batch processing, symlinked data, etc.) natively in Windows for cross-platform compatibility and reproducibility.
+- Development will continue in Linux/WSL2 for now, but Windows setup/testing is a future milestone for broader accessibility.
+
+---
 */
 
 # Project Roadmap (De-Novo Branch)
