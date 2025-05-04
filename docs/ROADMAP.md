@@ -189,4 +189,24 @@ To ensure full GPU acceleration, reproducibility, and access to the latest scien
 - Save scene boundaries and prepare outputs for downstream audio and visual analysis.
 - Document and version-control your progress.
 
-*This roadmap is a living document and will be updated as the project evolves. The backend-first, documentation- and rule-driven approach is central to all phases and milestones. Enjoy the journey!* 
+*This roadmap is a living document and will be updated as the project evolves. The backend-first, documentation- and rule-driven approach is central to all phases and milestones. Enjoy the journey!*
+
+---
+
+## 2025-05-04: Major Backend & Workflow Updates
+
+- **Scene Detection:**
+  - PyTorch-based TransNetV2 scene detection is now the default for CUDA-enabled systems.
+  - Batch processing (default: 100 frames per batch) prevents GPU out-of-memory errors, enabling robust processing of long videos.
+  - The pipeline is modular and can be easily extended or tuned for different hardware.
+
+- **Data Management:**
+  - The `data/` directory in the WSL project is now a symlink to the Windows data folder (`C:/Users/aitor/Video_Timeline/data`).
+  - All test videos should be placed in the Windows data folder; they will be instantly accessible in WSL for pipeline testing.
+  - Outputs and temp files written to `./data/` in WSL will appear in the Windows folder as well.
+
+- **Reproducibility & Testing:**
+  - The pipeline is robust for large videos and ready for further modular development.
+  - No files in `data/` are deleted or overwritten by the pipeline; all outputs are written to subfolders (e.g., `data/temp/`).
+
+--- 
