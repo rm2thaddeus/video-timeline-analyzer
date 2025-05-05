@@ -1,6 +1,7 @@
 /*
 📌 Purpose – Defines the phased, documentation-first roadmap for the de-novo branch of the Video Timeline Analyzer.
 🔄 Latest Changes – Clarified backend-only focus; emphasized modular, pipeline-oriented backend and automatic scene detection selection.
+🔄 2024-06: Added Windows development branch (de-novo-windows), Hugging Face weights integration, and reproducible download script for TransNetV2 PyTorch weights. Documented hardware-agnostic model loading.
 ⚙️ Key Logic – Backend development is prioritized, with modular scene detection (TransNet V2 if CUDA, else PySceneDetect).
 📂 Expected File Path – docs/ROADMAP.md
 🧠 Reasoning – Ensures a rigorous, reproducible, and maintainable backend foundation before any UI work.
@@ -193,4 +194,35 @@ To ensure full GPU acceleration, reproducibility, and access to the latest scien
 
 *This step ensures that all future development, automation, and troubleshooting are performed in the intended environment, maximizing reliability and scientific rigor.*
 
-*This roadmap is a living document and will be updated as the project evolves. The backend-first, documentation- and rule-driven approach is central to all phases and milestones. Enjoy the journey!* 
+*This roadmap is a living document and will be updated as the project evolves. The backend-first, documentation- and rule-driven approach is central to all phases and milestones. Enjoy the journey!*
+
+model = TransNetV2()
+state_dict = torch.load("transnetv2-pytorch-weights.pth")
+model.load_state_dict(state_dict)
+model.eval().cuda()
+
+## Windows Development Branch: de-novo-windows
+
+This branch enables native Windows development by leveraging the PyTorch weights for TransNetV2 published on Hugging Face. The pipeline can now run on Windows (CPU or GPU) without WSL2, provided the weights are downloaded using the provided script.
+
+**Key steps:**
+- Use the `de-novo-windows` branch for all Windows-native work.
+- Download the TransNetV2 weights with the script at `src/scene_detection/download_transnetv2_weights.py`.
+- The pipeline will automatically use GPU if available, else CPU.
+
+**Reproducibility:**
+- The weights are not committed to the repository. Instead, run the download script to obtain them.
+- See the README in `src/scene_detection/transnetv2_repo/inference-pytorch/` for details.
+
+**Hardware-agnostic loading:**
+The model loading code now detects CUDA availability and loads the model accordingly:
+```python
+import torch
+from transnetv2_pytorch import TransNetV2
+model = TransNetV2()
+state_dict = torch.load("transnetv2-pytorch-weights.pth", map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+model.load_state_dict(state_dict)
+model.eval()
+if torch.cuda.is_available():
+    model.cuda()
+``` 

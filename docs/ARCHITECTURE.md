@@ -1,6 +1,7 @@
 /*
 📌 Purpose – Defines the modular, reproducible system architecture for the Video Timeline Analyzer, with a focus on variable-granularity metadata alignment and backend-first development.
 🔄 Latest Changes – Clarified backend-only focus; emphasized modular, pipeline-oriented backend and automatic scene detection selection.
++ 🔄 2024-06: Added Windows development branch (de-novo-windows), Hugging Face weights integration, and reproducible download script for TransNetV2 PyTorch weights. Documented hardware-agnostic model loading.
 ⚙️ Key Logic – All pipeline outputs are parsed and aligned into a variable-granularity DataFrame, which is the canonical source for Qdrant ingestion and downstream analysis. Scene detection is modular: TransNet V2 if CUDA, else PySceneDetect.
 📂 Expected File Path – docs/ARCHITECTURE.md
 🧠 Reasoning – Ensures maintainability, extensibility, and reproducibility for scientific video analysis by making the DataFrame the central, queryable structure and prioritizing backend development.
@@ -65,7 +66,7 @@ The Video Timeline Analyzer is a modular, pipeline-oriented backend application 
 ### 4.2 Scene Detection (Modular, Backend-First)
 - **Purpose:** Segment video into scenes for timeline structure.
 - **Logic:** Automatically select the best method:
-    - **TransNet V2** (deep learning, GPU-accelerated) if CUDA is available
+    - **TransNet V2** (deep learning, GPU-accelerated, or CPU via PyTorch weights) if CUDA is available or on Windows
     - **PySceneDetect** (CPU, robust) as fallback
 - **Technologies:** TransNet V2, PySceneDetect, OpenCV
 - **Rationale:** Maximizes speed and accuracy on GPU systems, ensures compatibility everywhere.
@@ -136,3 +137,20 @@ The Video Timeline Analyzer is a modular, pipeline-oriented backend application 
 ---
 
 *This architecture ensures that all metadata is centrally aligned and queryable, supporting flexible, reproducible, and extensible scientific video analysis. Backend-first development ensures a robust foundation before UI work begins.*
+
+## Windows Compatibility and Weights Management
+
+The `de-novo-windows` branch enables native Windows development by using PyTorch weights for TransNetV2 from Hugging Face. The weights are not committed to the repository; instead, use the script at `src/scene_detection/download_transnetv2_weights.py` to download them.
+
+**Hardware-agnostic model loading:**
+The pipeline automatically detects CUDA availability and loads the model on GPU if available, else CPU:
+```python
+import torch
+from transnetv2_pytorch import TransNetV2
+model = TransNetV2()
+state_dict = torch.load("transnetv2-pytorch-weights.pth", map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+model.load_state_dict(state_dict)
+model.eval()
+if torch.cuda.is_available():
+    model.cuda()
+```
