@@ -60,8 +60,29 @@ For detailed architecture and future roadmap details, refer to:
 - [Architecture](ARCHITECTURE.md)
 - [Roadmap](ROADMAP.md)
 
-> **GPU Compatibility Note:**  
-> For full GPU acceleration of both TensorFlow (scene detection) and PyTorch-based models (Whisper, embeddings), you must use:
-> - TensorFlow 2.10.0 (last Windows GPU version) with CUDA 11.2 and cuDNN 8.1, and a compatible PyTorch (e.g., 1.12.1+cu112).
-> - Or, for the latest TensorFlow and PyTorch GPU support, use WSL2 + Ubuntu, which allows both frameworks to use the latest CUDA stack.
-> See the [Roadmap](ROADMAP.md) for details and troubleshooting. 
+## Scene Detection (TransNetV2, PyTorch, Cross-Platform)
+
+Scene detection now uses the PyTorch implementation of TransNetV2, with official weights published on Hugging Face. This workflow is fully cross-platform (Windows, WSL2, Linux, macOS) and hardware-agnostic (CPU or GPU).
+
+**Key steps:**
+1. Install PyTorch (with or without GPU support, as appropriate for your hardware):
+   - [PyTorch Installation Guide](https://pytorch.org/get-started/locally/)
+2. Download the TransNetV2 weights using the provided script:
+   ```bash
+   python src/scene_detection/download_transnetv2_weights.py
+   ```
+3. The pipeline will automatically use GPU if available, else CPU. No TensorFlow or CUDA setup is required for scene detection.
+
+**Hardware-agnostic model loading:**
+```python
+import torch
+from transnetv2_pytorch import TransNetV2
+model = TransNetV2()
+state_dict = torch.load("transnetv2-pytorch-weights.pth", map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+model.load_state_dict(state_dict)
+model.eval()
+if torch.cuda.is_available():
+    model.cuda()
+```
+
+See the [Roadmap](ROADMAP.md) for details and troubleshooting. 

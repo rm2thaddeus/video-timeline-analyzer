@@ -11,80 +11,36 @@ Before setting up the development environment, ensure you have the following ins
 3. **FFmpeg 4.0+**
 4. **CUDA Toolkit 11.7+** (for NVIDIA GPUs) or **ROCm 5.0+** (for AMD GPUs)
 
-## 1. GPU Configuration
+## 1. Scene Detection & GPU Configuration (PyTorch, Cross-Platform)
 
-### 1.1 NVIDIA GPU Setup
+### 1.1 TransNetV2 Scene Detection (PyTorch, Hugging Face Weights)
 
-#### Windows
+Scene detection now uses the PyTorch implementation of TransNetV2, with official weights published on Hugging Face. This workflow is fully cross-platform (Windows, WSL2, Linux, macOS) and hardware-agnostic (CPU or GPU).
 
-1. Download and install the latest [NVIDIA GPU Drivers](https://www.nvidia.com/Download/index.aspx)
-2. Install [CUDA Toolkit 11.7+](https://developer.nvidia.com/cuda-downloads)
-3. Optionally install [cuDNN](https://developer.nvidia.com/cudnn) for improved performance
+**Key steps:**
+1. Ensure you have Python 3.8+, Git, and FFmpeg installed.
+2. Install PyTorch (with or without GPU support, as appropriate for your hardware):
+   - [PyTorch Installation Guide](https://pytorch.org/get-started/locally/)
+3. Download the TransNetV2 weights using the provided script:
+   ```bash
+   python src/scene_detection/download_transnetv2_weights.py
+   ```
+4. The pipeline will automatically use GPU if available, else CPU. No TensorFlow or CUDA setup is required for scene detection.
 
-Verify installation:
-```bash
-nvcc --version
-nvidia-smi
+**Hardware-agnostic model loading:**
+```python
+import torch
+from transnetv2_pytorch import TransNetV2
+model = TransNetV2()
+state_dict = torch.load("transnetv2-pytorch-weights.pth", map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+model.load_state_dict(state_dict)
+model.eval()
+if torch.cuda.is_available():
+    model.cuda()
 ```
 
-#### Linux
-
-```bash
-# Install NVIDIA drivers
-sudo apt update
-sudo apt install nvidia-driver-xxx  # replace xxx with latest version
-
-# Install CUDA Toolkit
-wget https://developer.download.nvidia.com/compute/cuda/11.7.0/local_installers/cuda_11.7.0_515.43.04_linux.run
-sudo sh cuda_11.7.0_515.43.04_linux.run
-
-# Add CUDA to path
-echo 'export PATH=/usr/local/cuda/bin:$PATH' >> ~/.bashrc
-echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
-source ~/.bashrc
-```
-
-Verify installation:
-```bash
-nvcc --version
-nvidia-smi
-```
-
-#### macOS (Limited CUDA Support)
-
-macOS has limited CUDA support. For Apple Silicon (M1/M2), use the PyTorch MPS backend instead.
-
-```bash
-# For Apple Silicon
-# No CUDA installation needed, will use MPS backend
-```
-
-### 1.2 AMD GPU Setup (ROCm)
-
-#### Linux (Ubuntu)
-
-```bash
-# Add ROCm apt repository
-wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | sudo apt-key add -
-echo 'deb [arch=amd64] https://repo.radeon.com/rocm/apt/debian/ ubuntu main' | sudo tee /etc/apt/sources.list.d/rocm.list
-sudo apt update
-
-# Install ROCm
-sudo apt install rocm-dev
-
-# Add user to video group
-sudo usermod -a -G video $USER
-sudo usermod -a -G render $USER
-
-# Set environment variables
-echo 'export PATH=/opt/rocm/bin:$PATH' >> ~/.bashrc
-source ~/.bashrc
-```
-
-Verify installation:
-```bash
-rocminfo
-```
+**Legacy/Advanced GPU Setup:**
+If you require advanced GPU configuration (e.g., for other models or full scientific stack), see the troubleshooting and legacy notes at the end of this document, or refer to the [Roadmap](ROADMAP.md).
 
 ## 2. Virtual Environment Setup
 
@@ -140,177 +96,21 @@ pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 
-### 3.3 GPU Detection Script
+### 3.3 Download TransNetV2 Weights
 
-Create a script to detect and configure available GPUs:
-
-```python
-# src/utils/gpu_utils.py
-
-import os
-import platform
-import logging
-from typing import Tuple, Optional
-
-import torch
-
-logger = logging.getLogger(__name__)
-
-def detect_gpu() -> Tuple[bool, Optional[str], int]:
-    """
-    Detect available GPU and return configuration information.
-    
-    Returns:
-        Tuple containing:
-        - Boolean indicating if GPU is available
-        - String with GPU type ('cuda', 'mps', 'rocm', None)
-        - Integer with device count (0 if no GPU)
-    """
-    has_gpu = False
-    gpu_type = None
-    device_count = 0
-    
-    # Check for NVIDIA GPU (CUDA)
-    if torch.cuda.is_available():
-        has_gpu = True
-        gpu_type = 'cuda'
-        device_count = torch.cuda.device_count()
-        for i in range(device_count):
-            logger.info(f"CUDA Device {i}: {torch.cuda.get_device_name(i)}")
-            logger.info(f"  - Compute Capability: {torch.cuda.get_device_capability(i)}")
-            logger.info(f"  - Memory: {torch.cuda.get_device_properties(i).total_memory / 1e9:.2f} GB")
-    
-    # Check for Apple Silicon (MPS)
-    elif platform.system() == 'Darwin' and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-        has_gpu = True
-        gpu_type = 'mps'
-        device_count = 1
-        logger.info("Apple Silicon (MPS) GPU available")
-    
-    # Check for AMD ROCm
-    elif hasattr(torch, 'hip') and torch.hip.is_available():
-        has_gpu = True
-        gpu_type = 'rocm'
-        device_count = torch.hip.device_count()
-        logger.info(f"ROCm GPU available with {device_count} devices")
-    
-    # No GPU available
-    else:
-        logger.warning("No GPU detected. Using CPU only (performance will be significantly reduced)")
-    
-    # Log environment variables for debugging
-    logger.debug(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'Not set')}")
-    logger.debug(f"HIP_VISIBLE_DEVICES: {os.environ.get('HIP_VISIBLE_DEVICES', 'Not set')}")
-    
-    return has_gpu, gpu_type, device_count
-
-def get_optimal_device() -> torch.device:
-    """
-    Get the optimal device (GPU if available, otherwise CPU).
-    
-    Returns:
-        torch.device: The optimal device for computation
-    """
-    has_gpu, gpu_type, _ = detect_gpu()
-    
-    if not has_gpu:
-        return torch.device('cpu')
-    
-    if gpu_type == 'cuda':
-        return torch.device('cuda')
-    elif gpu_type == 'mps':
-        return torch.device('mps')
-    elif gpu_type == 'rocm':
-        return torch.device('cuda')  # ROCm uses the 'cuda' device type in PyTorch
-    
-    return torch.device('cpu')
-
-def optimize_gpu_settings():
-    """Configure optimal settings for the detected GPU."""
-    has_gpu, gpu_type, _ = detect_gpu()
-    
-    if not has_gpu:
-        return
-    
-    # NVIDIA CUDA settings
-    if gpu_type == 'cuda':
-        # Set TF32 for faster computation on Ampere+ GPUs
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        
-        # Enable cuDNN benchmarking for optimal performance
-        torch.backends.cudnn.benchmark = True
-        
-        # Set memory allocation strategy
-        if hasattr(torch.cuda, 'set_per_process_memory_fraction'):
-            # Leave some GPU memory for other processes
-            torch.cuda.set_per_process_memory_fraction(0.9)
-    
-    # Apple Silicon MPS settings  
-    elif gpu_type == 'mps':
-        # MPS-specific optimizations would go here
-        pass
-    
-    # AMD ROCm settings
-    elif gpu_type == 'rocm':
-        torch.backends.cudnn.benchmark = True
+Download the PyTorch weights for TransNetV2 using the provided script:
+```bash
+python src/scene_detection/download_transnetv2_weights.py
 ```
+
+### 3.4 (Optional) GPU Detection Script
+
+The project includes a utility for detecting and configuring available GPUs in `src/utils/gpu_utils.py`.
+See the [Roadmap](ROADMAP.md) for details.
 
 ## 4. Testing GPU Setup
 
-Create a test script to verify that GPU is correctly configured:
-
-```bash
-# Create test script
-cat > test_gpu.py << 'EOL'
-#!/usr/bin/env python
-
-import torch
-import time
-from src.utils.gpu_utils import detect_gpu, get_optimal_device
-
-def main():
-    print("Testing GPU setup...")
-    has_gpu, gpu_type, device_count = detect_gpu()
-    
-    if not has_gpu:
-        print("No GPU detected. Running on CPU only.")
-        device = torch.device('cpu')
-    else:
-        print(f"GPU detected: {gpu_type} with {device_count} devices")
-        device = get_optimal_device()
-    
-    print(f"Using device: {device}")
-    
-    # Create test tensors
-    size = 5000
-    print(f"Running matrix multiplication test ({size}x{size})...")
-    
-    # Create random matrices
-    a = torch.randn(size, size, device=device)
-    b = torch.randn(size, size, device=device)
-    
-    # Warmup
-    torch.matmul(a, b)
-    
-    # Benchmark
-    start_time = time.time()
-    for _ in range(3):
-        c = torch.matmul(a, b)
-    torch.cuda.synchronize() if device.type == 'cuda' else None
-    end_time = time.time()
-    
-    avg_time = (end_time - start_time) / 3
-    print(f"Average time: {avg_time:.4f} seconds")
-    print("GPU test completed successfully!")
-
-if __name__ == "__main__":
-    main()
-EOL
-
-# Run the test
-python test_gpu.py
-```
+You can test your GPU setup using the provided utility in `src/utils/gpu_utils.py` or by running a simple PyTorch test. See the [Roadmap](ROADMAP.md) for details.
 
 ## 5. Common Issues & Troubleshooting
 
@@ -403,8 +203,8 @@ export TF_MEMORY_ALLOCATION=0.8  # Use 80% of GPU memory
 
 After successfully setting up your development environment:
 
-1. Complete the project structure by creating core directories
-2. Implement the GPU utility module in `src/utils/gpu_utils.py`
-3. Begin developing core functionality according to the roadmap
+1. Download the TransNetV2 weights as described above.
+2. Complete the project structure by creating core directories.
+3. Begin developing core functionality according to the [Roadmap](ROADMAP.md).
 
 For any issues, consult the troubleshooting section or create an issue on the project's GitHub repository.
