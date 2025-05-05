@@ -15,33 +15,40 @@ This roadmap defines the phases and milestones for the de-novo branch, focusing 
 
 **Note:** This project is being developed by a single scientist-developer, with a focus on learning, fun, and leveraging AI/code assistants to minimize manual coding. The process is designed to be enjoyable and educational, not just productive.
 
-## Hardware Acceleration (TensorFlow/CUDA) Status
+## Scene Detection: PyTorch (TransNetV2) Cross-Platform Status
 
-- **Current State:**
-  - TensorFlow 2.19.0 is installed, but does not support GPU on Windows (only CPU is used).
-  - CUDA Toolkit 12.8 is installed, but TensorFlow GPU support on Windows requires CUDA 11.2 and cuDNN 8.1.
-  - Diagnostic scripts confirm: TensorFlow is not built with CUDA, no GPUs are detected, and CUDA/cuDNN are not available to TensorFlow.
+**Current State:**
+- Scene detection now uses the PyTorch implementation of TransNetV2, with official weights published on Hugging Face ([link](https://huggingface.co/ByteDance/shot2story/blob/ff853c571fd92eb4e0c5713e27f2a323ac903f67/transnetv2-pytorch-weights.pth)).
+- The pipeline is fully cross-platform: works natively on Windows, WSL2, and Linux, with automatic hardware detection (CPU or GPU).
+- No TensorFlow or CUDA setup is required for scene detection. The only requirement is PyTorch (CPU or GPU) and the weights file.
+- The weights are not committed to the repository. Instead, use the reproducible script at `src/scene_detection/download_transnetv2_weights.py` to download them automatically.
+- The codebase uses hardware-agnostic loading:
+  ```python
+  import torch
+  from transnetv2_pytorch import TransNetV2
+  model = TransNetV2()
+  state_dict = torch.load("transnetv2-pytorch-weights.pth", map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+  model.load_state_dict(state_dict)
+  model.eval()
+  if torch.cuda.is_available():
+      model.cuda()
+  ```
 
-- **Why:**
-  - TensorFlow dropped native Windows GPU support after version 2.10.0. Newer versions (2.11+) are CPU-only on Windows.
-  - TensorFlow is strict about CUDA/cuDNN versions; mismatches result in no GPU usage.
+**Why:**
+- This approach removes the strict dependency on TensorFlow/CUDA versions and enables native Windows development, as well as easier onboarding for all users.
+- PyTorch is more flexible and widely supported across platforms.
 
-- **Recommended Solutions:**
-  1. **For Windows Native GPU Support:**
-     - Uninstall CUDA 12.8 and install CUDA 11.2 + cuDNN 8.1.
-     - Downgrade TensorFlow to 2.10.0 (`pip install tensorflow==2.10.0`).
-     - Add CUDA and cuDNN `bin` directories to system PATH.
-  2. **For Latest TensorFlow GPU Support:**
-     - Use WSL2 + Ubuntu, install latest TensorFlow and CUDA inside WSL2.
+**Recommended Workflow:**
+1. Use the `de-novo-windows` branch for Windows-native or cross-platform development.
+2. Run the download script to obtain the weights:
+   ```bash
+   python src/scene_detection/download_transnetv2_weights.py
+   ```
+3. The pipeline will use GPU if available, else CPU, with no manual configuration needed.
 
-- **Action Items:**
-  - Decide on native Windows vs. WSL2 approach for future development.
-  - Update documentation and onboarding instructions accordingly.
-
-- **Pipeline Compatibility Note:**
-  - PyTorch (for Whisper and embedding models) is more flexible with CUDA versions than TensorFlow.
-  - For full GPU acceleration on native Windows, use PyTorch 1.12.1+cu112 with CUDA 11.2.
-  - For the latest PyTorch and TensorFlow, use WSL2 + Ubuntu.
+**Pipeline Compatibility Note:**
+- PyTorch is also used for Whisper and embedding models, ensuring a unified, flexible backend.
+- WSL2 remains recommended for full scientific stack compatibility, but is not required for scene detection or most backend tasks.
 
 ---
 
