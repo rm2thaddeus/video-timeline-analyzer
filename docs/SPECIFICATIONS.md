@@ -61,9 +61,7 @@ class VideoIngestor:
 
 #### 2.2.1 Detection Methods
 
-- **Content-Aware**: Analyze visual content for semantic changes
-- **Threshold-Based**: Detect significant pixel/histogram changes
-- **Hybrid**: Combine both approaches with weighted scoring
+- **Deep Learning (TransNet V2, PyTorch-only):** Uses the official PyTorch implementation of TransNet V2 for robust, hardware-agnostic scene boundary detection. This is the only supported method in the Windows-native branch.
 
 #### 2.2.2 Performance Metrics
 
@@ -75,15 +73,27 @@ class VideoIngestor:
 
 ```python
 class SceneDetector:
-    def detect_scenes(video: VideoContainer, 
-                      method: Literal['content', 'threshold', 'hybrid'] = 'hybrid',
-                      sensitivity: float = 0.5) -> List[Scene]:
-        """Detect scene changes and return list of scenes."""
-        
-    def extract_keyframes(scenes: List[Scene], 
+    def detect_scenes(video: VideoContainer,
+                      batch_size: int = 100,
+                      threshold: float = 0.5,
+                      min_scene_len: int = 15,
+                      output_format: Literal['json', 'csv', 'both'] = 'json') -> List[Scene]:
+        """Detect scene changes and return list of scenes with both frame and time boundaries."""
+
+    def extract_keyframes(scenes: List[Scene],
                          strategy: Literal['first', 'middle', 'representative'] = 'representative') -> Dict[Scene, List[Frame]]:
         """Extract key frames from each scene."""
 ```
+
+**Output Specification:**
+- **Default:** JSON file with a list of scenes, each containing:
+    - `start_frame` (int)
+    - `end_frame` (int)
+    - `start_time` (float, seconds)
+    - `end_time` (float, seconds)
+- **Optional:** CSV file with the same fields, if requested.
+
+**Note:** No other scene detection backends (e.g., PySceneDetect, threshold-based, hybrid) are supported in this branch. All logic is PyTorch-only, hardware-agnostic, and Windows-native.
 
 ### 2.3 Audio Analysis Pipeline
 
@@ -155,6 +165,9 @@ class VisualPipeline:
         
     def create_embedding(frame: Frame) -> List[float]:
         """Create vector embedding for the frame."""
+    
+    def create_video_embedding(video_path: str) -> List[float]:
+        """Create a robust video embedding using Hugging Face TimeSformer with manual preprocessing (see DEVELOPMENT_SETUP.md)."""
 ```
 
 ### 2.5 Data Fusion & Scoring

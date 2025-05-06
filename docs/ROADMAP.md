@@ -1,26 +1,26 @@
 /*
-📌 Purpose – Defines the phased, documentation-first roadmap for the de-novo branch of the Video Timeline Analyzer.
-🔄 Latest Changes – Clarified backend-only focus; emphasized modular, pipeline-oriented backend and automatic scene detection selection.
-🔄 2024-06: Added Windows development branch (de-novo-windows), Hugging Face weights integration, and reproducible download script for TransNetV2 PyTorch weights. Documented hardware-agnostic model loading.
-⚙️ Key Logic – Backend development is prioritized, with modular scene detection (TransNet V2 if CUDA, else PySceneDetect).
+📌 Purpose – Defines the phased, documentation-first roadmap for the de-novo-windows branch of the Video Timeline Analyzer.
+🔄 Latest Changes – Clarified Windows-native focus; removed WSL2/Linux as default; emphasized modular, pipeline-oriented backend and PyTorch-only scene detection.
+🔄 2024-06: Windows development is now the mainline; Hugging Face weights integration and reproducible download script for TransNetV2 PyTorch weights. Documented hardware-agnostic model loading for Windows.
+⚙️ Key Logic – Backend development is prioritized, with modular scene detection (TransNet V2, PyTorch-only, hardware-agnostic).
 📂 Expected File Path – docs/ROADMAP.md
-🧠 Reasoning – Ensures a rigorous, reproducible, and maintainable backend foundation before any UI work.
+🧠 Reasoning – Ensures a rigorous, reproducible, and maintainable backend foundation for Windows-native development before any UI work.
 */
 
-# Project Roadmap (De-Novo Branch)
+# Project Roadmap (De-Novo-Windows Branch)
 
 ## Overview
 
-This roadmap defines the phases and milestones for the de-novo branch, focusing on backend development only (no UI yet). The goal is a modular, pipeline-oriented backend for scientific video analysis, with automatic selection of the best scene detection method (TransNet V2 if CUDA is available, else PySceneDetect).
+This roadmap defines the phases and milestones for the de-novo-windows branch, focusing on backend development for **Windows-native** environments (no WSL2 or Linux required). The goal is a modular, pipeline-oriented backend for scientific video analysis, with PyTorch-only scene detection (TransNet V2).
 
 **Note:** This project is being developed by a single scientist-developer, with a focus on learning, fun, and leveraging AI/code assistants to minimize manual coding. The process is designed to be enjoyable and educational, not just productive.
 
-## Scene Detection: PyTorch (TransNetV2) Cross-Platform Status
+## Scene Detection: PyTorch (TransNetV2) Windows-Native Status
 
 **Current State:**
 - Scene detection now uses the PyTorch implementation of TransNetV2, with official weights published on Hugging Face ([link](https://huggingface.co/ByteDance/shot2story/blob/ff853c571fd92eb4e0c5713e27f2a323ac903f67/transnetv2-pytorch-weights.pth)).
-- The pipeline is fully cross-platform: works natively on Windows, WSL2, and Linux, with automatic hardware detection (CPU or GPU).
-- No TensorFlow or CUDA setup is required for scene detection. The only requirement is PyTorch (CPU or GPU) and the weights file.
+- The pipeline is fully Windows-native: works on Windows (CPU or GPU), with automatic hardware detection.
+- No TensorFlow, CUDA setup, or WSL2 is required for scene detection. The only requirement is PyTorch (CPU or GPU) and the weights file.
 - The weights are not committed to the repository. Instead, use the reproducible script at `src/scene_detection/download_transnetv2_weights.py` to download them automatically.
 - The codebase uses hardware-agnostic loading:
   ```python
@@ -39,7 +39,7 @@ This roadmap defines the phases and milestones for the de-novo branch, focusing 
 - PyTorch is more flexible and widely supported across platforms.
 
 **Recommended Workflow:**
-1. Use the `de-novo-windows` branch for Windows-native or cross-platform development.
+1. Use the `de-novo-windows` branch for Windows-native development.
 2. Run the download script to obtain the weights:
    ```bash
    python src/scene_detection/download_transnetv2_weights.py
@@ -48,7 +48,7 @@ This roadmap defines the phases and milestones for the de-novo branch, focusing 
 
 **Pipeline Compatibility Note:**
 - PyTorch is also used for Whisper and embedding models, ensuring a unified, flexible backend.
-- WSL2 remains recommended for full scientific stack compatibility, but is not required for scene detection or most backend tasks.
+- Native Windows is now the recommended and supported environment for all backend tasks.
 
 ## Audio Analysis: Whisper (Modular, Dual Output)
 
@@ -75,60 +75,72 @@ This roadmap defines the phases and milestones for the de-novo branch, focusing 
 **Pipeline Compatibility Note:**
 - The modular approach ensures compatibility with the rest of the backend pipeline and future UI work.
 
+## Visual Analysis: Embedding Extraction
+
+**Current State:**
+- Visual embedding extraction now uses a robust, manually preprocessed Hugging Face TimeSformer module (see DEVELOPMENT_SETUP.md). This avoids dependency on processor classes and ensures future compatibility.
+
+**Why:**
+- This approach provides a reliable and consistent method for embedding extraction, which is crucial for various downstream tasks.
+
+**Recommended Workflow:**
+1. Use the embedding extraction module in `src/visual_analysis/embedding_extraction.py`.
+2. Run on any video in the `data` directory; outputs will be saved in the `embedding_extraction` output directory.
+
+**Pipeline Compatibility Note:**
+- The modular approach ensures compatibility with the rest of the backend pipeline and future UI work.
+
 ---
 
-## Developing in WSL2 + Ubuntu: Best Practices & Workflow
+## Windows-Native Development: Best Practices & Workflow
 
-To ensure full GPU acceleration, reproducibility, and access to the latest scientific Python tools, all backend development should be performed inside the WSL2 Ubuntu environment. Follow these guidelines for a seamless workflow:
+To ensure full GPU acceleration, reproducibility, and access to the latest scientific Python tools, all backend development should be performed natively in Windows. Follow these guidelines for a seamless workflow:
 
-### 1. Launching Your WSL2 Development Environment
-- Open Ubuntu from the Start Menu, or run `wsl.exe -d Ubuntu` in PowerShell.
-- (Recommended) Open your project folder in VSCode or Cursor using the "Remote - WSL" extension for a native Linux development experience with full AI/code assistant support.
+### 1. Launching Your Windows Development Environment
+- Open your project folder in VSCode or Cursor on Windows.
+- Ensure your Python environment is set up using a virtual environment (venv) in Windows.
 
 ### 2. Project Location & File Access
-- **Preferred:** Clone your repository inside your Ubuntu home directory (e.g., `~/video-timeline-analyzer`).
-- **Alternative:** Access your Windows files from `/mnt/c/Users/<your-username>/Video_Timeline`, but note that performance and compatibility are best when working in the Linux filesystem.
+- Clone your repository inside your Windows user directory (e.g., `C:\Users\<your-username>\Video_Timeline`).
+- All file access and development should be performed natively in Windows for best compatibility.
 
 ### 3. Python Environment Management
 - Always use a Python virtual environment (`venv`) for all development:
-  ```bash
-  python3 -m venv venv
-  source venv/bin/activate
+  ```powershell
+  python -m venv venv
+  .\venv\Scripts\activate
   pip install --upgrade pip
   pip install -r requirements.txt
   ```
-- Install all dependencies inside the venv. For GPU support, install the latest TensorFlow and PyTorch (these are WSL2-compatible by default).
+- Install all dependencies inside the venv. For GPU support, install the latest PyTorch (Windows-compatible).
 
 ### 4. GPU & CUDA Verification
 - Confirm GPU access with:
-  ```bash
-  python -c "import tensorflow as tf; print('TF GPUs:', tf.config.list_physical_devices('GPU'))"
+  ```powershell
   python -c "import torch; print('Torch CUDA available:', torch.cuda.is_available())"
-  nvidia-smi
   ```
-- If you see your GPU listed, you are ready for accelerated development.
+- If you see `True`, you are ready for accelerated development.
 
 ### 5. Using AI/Code Assistants
-- AI/code assistants (Cursor, Copilot, ChatGPT, etc.) work seamlessly in VSCode/Cursor via WSL2.
-- All code generation, refactoring, and automation should be performed in the WSL2 environment for consistency.
+- AI/code assistants (Cursor, Copilot, ChatGPT, etc.) work seamlessly in VSCode/Cursor on Windows.
+- All code generation, refactoring, and automation should be performed in the Windows environment for consistency.
 
 ### 6. Git & Version Control
-- Use `git` inside Ubuntu for all commits, branching, and pushes.
-- Ensure all changes are staged and committed from within WSL2 to avoid line ending or permission issues.
+- Use `git` in Windows for all commits, branching, and pushes.
+- Ensure all changes are staged and committed from within Windows to avoid line ending or permission issues.
 
 ### 7. Troubleshooting & Documentation
-- Record your environment details (TensorFlow, PyTorch, CUDA versions) in `docs/ENVIRONMENT.md` for reproducibility.
-- Suppress TensorFlow log spam by adding `os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"` at the top of your scripts if desired.
+- Record your environment details (PyTorch, CUDA versions) in `docs/ENVIRONMENT.md` for reproducibility.
 
 ### 8. Summary Table
 | Task Type                | Where to Run?         | Notes                         |
 |--------------------------|-----------------------|-------------------------------|
-| Backend Python code      | WSL2 (Ubuntu)         | Full GPU, best practice       |
-| CUDA/TensorFlow/PyTorch  | WSL2 (Ubuntu)         | Required for GPU support      |
-| File access (project)    | WSL2 recommended      | Use Linux FS for best results |
-| Git/version control      | WSL2 (Ubuntu)         | Avoids Windows/Unix issues    |
+| Backend Python code      | Windows               | Full GPU, best practice       |
+| PyTorch                  | Windows               | Required for GPU support      |
+| File access (project)    | Windows               | Use Windows FS for best results |
+| Git/version control      | Windows               | Avoids Windows/Unix issues    |
 
-> **All backend, scientific, and GPU-accelerated work should be done in WSL2 Ubuntu for maximum compatibility, performance, and reproducibility.**
+> **All backend, scientific, and GPU-accelerated work should be done natively in Windows for maximum compatibility, performance, and reproducibility.**
 
 ---
 
@@ -176,9 +188,9 @@ To ensure full GPU acceleration, reproducibility, and access to the latest scien
 - [x] Set up the modular folder structure (see `src/` and subfolders for each pipeline stage)
 - [x] Begin implementation of core backend modules:
     - [x] Ingestion (video/audio loading) – started and tested
-    - [x] Scene detection (automatic: TransNet V2 if CUDA, else PySceneDetect)
+    - [x] Scene detection (PyTorch-only, TransNet V2)
     - [x] Audio analysis (modular, dual output: SRT + JSON, DataFrame-ready)
-    - [ ] Visual analysis
+    - [x] Visual embedding extraction now uses a robust, manually preprocessed Hugging Face TimeSformer module (see DEVELOPMENT_SETUP.md)
     - [ ] Metadata/DataFrame construction
     - [ ] Database (Qdrant) integration
 - [ ] Write initial unit tests in `tests/`
@@ -207,7 +219,6 @@ To ensure full GPU acceleration, reproducibility, and access to the latest scien
     - [Software Carpentry: Scientific Programming Best Practices](https://software-carpentry.org/lessons/)
     - [GitHub Guides: Mastering Markdown](https://guides.github.com/features/mastering-markdown/)
     - [Qdrant Documentation](https://qdrant.tech/documentation/)
-    - [PySceneDetect Documentation](https://pyscenedetect.readthedocs.io/en/latest/)
     - [TransNet V2 (Shot Boundary Detection)](https://github.com/soCzech/TransNetV2)
     - [OpenAI Whisper](https://github.com/openai/whisper)
     - [CLIP and BLIP-2 Models](https://github.com/openai/CLIP), (https://github.com/salesforce/BLIP)
@@ -216,12 +227,12 @@ To ensure full GPU acceleration, reproducibility, and access to the latest scien
 
 ## Next Logical Step
 
-**Ensure Cursor and Code Assistant Plugins Operate in WSL2**
-- To guarantee all code generation, automation, and AI-assisted development occurs in the correct (GPU-accelerated, Linux-native) environment, make sure Cursor and any code assistant plugins are running in your WSL2 shell.
+**Ensure Cursor and Code Assistant Plugins Operate in Windows**
+- To guarantee all code generation, automation, and AI-assisted development occurs in the correct (GPU-accelerated, Windows-native) environment, make sure Cursor and any code assistant plugins are running in your Windows shell.
 - **How to do this:**
-  - Open your project folder in VSCode or Cursor using the "Remote - WSL" extension (or equivalent for your editor).
-  - Confirm that the integrated terminal and all code execution are happening in the Ubuntu/WSL2 environment (you should see your Linux username and home directory in the prompt, e.g., `aitor@AitorMSI:~`).
-  - If using plugins, ensure they are enabled and configured for the WSL2 context.
+  - Open your project folder in VSCode or Cursor on Windows.
+  - Confirm that the integrated terminal and all code execution are happening in the Windows environment (you should see your Windows username and path in the prompt, e.g., `C:\Users\aitor>`).
+  - If using plugins, ensure they are enabled and configured for the Windows context.
 - This step is essential for reproducibility, full GPU acceleration, and seamless scientific development.
 
 *This step ensures that all future development, automation, and troubleshooting are performed in the intended environment, maximizing reliability and scientific rigor.*

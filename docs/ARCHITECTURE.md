@@ -1,10 +1,9 @@
 /*
 📌 Purpose – Defines the modular, reproducible system architecture for the Video Timeline Analyzer, with a focus on variable-granularity metadata alignment and backend-first development.
-🔄 Latest Changes – Clarified backend-only focus; emphasized modular, pipeline-oriented backend and automatic scene detection selection.
-+ 🔄 2024-06: Added Windows development branch (de-novo-windows), Hugging Face weights integration, and reproducible download script for TransNetV2 PyTorch weights. Documented hardware-agnostic model loading.
-⚙️ Key Logic – All pipeline outputs are parsed and aligned into a variable-granularity DataFrame, which is the canonical source for Qdrant ingestion and downstream analysis. Scene detection is modular: TransNet V2 if CUDA, else PySceneDetect.
+🔄 Latest Changes – Clarified Windows-native, PyTorch-only backend; removed references to TensorFlow, PySceneDetect, and WSL2/Linux. Emphasized modular, pipeline-oriented backend and hardware-agnostic model loading for Windows.
+⚙️ Key Logic – All pipeline outputs are parsed and aligned into a variable-granularity DataFrame, which is the canonical source for Qdrant ingestion and downstream analysis. Scene detection is modular: TransNet V2 (PyTorch-only, hardware-agnostic, Windows-native).
 📂 Expected File Path – docs/ARCHITECTURE.md
-🧠 Reasoning – Ensures maintainability, extensibility, and reproducibility for scientific video analysis by making the DataFrame the central, queryable structure and prioritizing backend development.
+🧠 Reasoning – Ensures maintainability, extensibility, and reproducibility for scientific video analysis by making the DataFrame the central, queryable structure and prioritizing backend development for Windows.
 */
 
 # Video Timeline Analyzer: System Architecture
@@ -13,7 +12,7 @@
 
 The Video Timeline Analyzer is a modular, pipeline-oriented backend application for extracting rich, interpretable metadata from video files. The central architectural principle is the use of a variable-granularity metadata DataFrame, which aggregates and aligns all outputs from the analysis pipelines (scene detection, audio transcription, frame extraction, embeddings, etc.). This DataFrame is the canonical, queryable structure for all downstream tasks, including vector database (Qdrant) ingestion.
 
-**Current focus:** Backend development only (no UI yet). All logic is modular and pipeline-oriented, with automatic selection of the best scene detection method based on hardware.
+**Current focus:** Backend development only (no UI yet). All logic is modular and pipeline-oriented, with PyTorch-only scene detection (TransNet V2, Windows-native, hardware-agnostic).
 
 ---
 
@@ -25,12 +24,10 @@ The Video Timeline Analyzer is a modular, pipeline-oriented backend application 
 - **Alignment Logic:** All pipeline outputs are parsed and aligned into the DataFrame, with explicit logic for handling overlaps and variable segmentations.
 - **Extensibility:** New analysis modules and metadata fields can be added as needed.
 - **Efficiency:** Parallelization and caching for large-scale video processing.
-- **Resilience:** Fallbacks for critical steps; robust error handling.
+- **Resilience:** Robust error handling.
 
 > **Note on GPU Stack Compatibility:**  
-> The pipeline uses both TensorFlow (scene detection) and PyTorch (Whisper, embeddings).  
-> - On native Windows, GPU support requires TensorFlow 2.10.0, CUDA 11.2, cuDNN 8.1, and a compatible PyTorch (e.g., 1.12.1+cu112).
-> - For the latest features and easier setup, WSL2 + Ubuntu is recommended for full GPU acceleration across all modules.
+> The pipeline is Windows-native and uses PyTorch for all deep learning modules (scene detection, Whisper, embeddings). No TensorFlow, PySceneDetect, or WSL2/Linux is required. Hardware-agnostic model loading ensures automatic use of GPU if available, else CPU.
 
 ---
 
@@ -42,7 +39,6 @@ The Video Timeline Analyzer is a modular, pipeline-oriented backend application 
 +------------------+    +---------------------+    | DataFrame      |
                          |                |         +----------------+
                          v                v                |
-                    +-----------+   +-----------+          |
                     | Audio     |   | Visual    |          |
                     | Pipeline  |   | Pipeline  |          |
                     +-----------+   +-----------+          |
@@ -63,13 +59,11 @@ The Video Timeline Analyzer is a modular, pipeline-oriented backend application 
 - **Purpose:** Load video, extract frames/audio, and basic metadata.
 - **Technologies:** FFmpeg (video/audio extraction), OpenCV (frame handling)
 
-### 4.2 Scene Detection (Modular, Backend-First)
+### 4.2 Scene Detection (PyTorch-Only, Windows-Native)
 - **Purpose:** Segment video into scenes for timeline structure.
-- **Logic:** Automatically select the best method:
-    - **TransNet V2** (deep learning, GPU-accelerated, or CPU via PyTorch weights) if CUDA is available or on Windows
-    - **PySceneDetect** (CPU, robust) as fallback
-- **Technologies:** TransNet V2, PySceneDetect, OpenCV
-- **Rationale:** Maximizes speed and accuracy on GPU systems, ensures compatibility everywhere.
+- **Logic:** Use TransNet V2 (PyTorch-only, hardware-agnostic, Windows-native) for all scene detection.
+- **Technologies:** TransNet V2 (PyTorch), OpenCV
+- **Rationale:** Maximizes speed and accuracy on GPU systems, ensures compatibility everywhere on Windows.
 
 ### 4.3 Audio Analysis Pipeline
 - **Purpose:** Extract and analyze audio for speech, sentiment, and events.
@@ -78,17 +72,10 @@ The Video Timeline Analyzer is a modular, pipeline-oriented backend application 
     - **JSON**: Segment-level output (start/end, text) for direct ingestion into the variable-granularity DataFrame (default, always saved).
     - **SRT**: Optional subtitle file for human alignment and review (enabled by argument).
     - **WAV**: Optional full audio extraction (enabled by argument).
-- **Modularity & Configurability:**
-    - The pipeline is highly configurable: users can select the Whisper model size (`tiny`, `small`, `medium`), number of parallel workers (auto-estimated for GPU VRAM if not provided), and which outputs to save.
-    - The function `estimate_max_workers` automatically determines the optimal number of parallel processes for the selected model and available GPU VRAM, maximizing speed without risking OOM errors.
-- **Rationale:**
-    - JSON provides all metadata needed for scientific alignment and DataFrame construction.
-    - SRT and WAV are available for review or downstream use, but are not generated by default to save resources.
-    - The pipeline is optimized for both speed and scientific reproducibility, with all parameters logged and version-controlled.
 
 ### 4.4 Visual Analysis Pipeline
 - **Purpose:** Extract semantic and emotional context from frames.
-- **Technologies:** CLIP (embeddings/tags), BLIP-2 (captioning), DeepFace (facial emotion)
+- **Technologies:** CLIP (embeddings/tags), BLIP-2 (captioning), DeepFace (facial emotion), **Hugging Face TimeSformer (video embeddings, manual preprocessing; see DEVELOPMENT_SETUP.md)**
 
 ### 4.5 Metadata DataFrame Construction (Central Step)
 - **Purpose:** Parse and align all pipeline outputs (scenes, transcripts, frames, embeddings, etc.) into a single DataFrame with variable granularity.
