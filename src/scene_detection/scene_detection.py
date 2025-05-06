@@ -174,4 +174,42 @@ def predictions_to_scenes(predictions: np.ndarray, threshold: float = 0.5, min_s
             prev = b
     if prev < len(predictions)-1:
         scenes.append((prev, len(predictions)-1))
-    return scenes 
+    return scenes
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Scene detection using TransNet V2 (PyTorch)")
+    parser.add_argument("video_path", type=str, help="Path to input video file.")
+    parser.add_argument("output_dir", type=str, help="Directory to save outputs.")
+    parser.add_argument("--batch_size", type=int, default=100, help="Batch size for inference.")
+    parser.add_argument("--threshold", type=float, default=0.5, help="Threshold for scene boundary detection.")
+    parser.add_argument("--min_scene_len", type=int, default=15, help="Minimum scene length in frames.")
+    parser.add_argument("--num_workers", type=int, default=4, help="Number of threads for frame extraction.")
+    parser.add_argument("--save_json", type=lambda x: (str(x).lower() == 'true'), default=True, help="Save results as JSON.")
+    parser.add_argument("--save_csv", type=lambda x: (str(x).lower() == 'true'), default=False, help="Save results as CSV.")
+    parser.add_argument("--device", type=str, default=None, choices=["cuda", "cpu", None], help="Device to use ('cuda' or 'cpu').")
+    args = parser.parse_args()
+
+    # Set device if specified
+    if args.device:
+        import torch
+        if args.device == "cuda" and not torch.cuda.is_available():
+            print("[SceneDetection] CUDA requested but not available. Falling back to CPU.")
+            device = "cpu"
+        else:
+            device = args.device
+    else:
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    detect_scenes(
+        video_path=args.video_path,
+        output_dir=args.output_dir,
+        batch_size=args.batch_size,
+        threshold=args.threshold,
+        min_scene_len=args.min_scene_len,
+        num_workers=args.num_workers,
+        save_json=args.save_json,
+        save_csv=args.save_csv,
+        device=device
+    ) 
