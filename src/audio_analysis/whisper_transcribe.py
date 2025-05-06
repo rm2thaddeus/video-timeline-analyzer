@@ -1,15 +1,43 @@
 """
-📌 Purpose – Modular audio transcription using Whisper-medium, with dual output: SRT (subtitle) and JSON (granular, DataFrame-ready). Now also outputs the full extracted audio as WAV for downstream use, and uses overlapping chunking for robust segment boundaries.
-🔄 Latest Changes – Added process-based parallel chunk transcription for full GPU utilization; 'num_workers' parameter controls parallelism.
-⚙️ Key Logic – Extracts audio, splits into overlapping chunks (default 30s, 2s overlap), transcribes each in parallel with Whisper-medium, deduplicates segments, and saves all outputs (audio, SRT, JSON).
+📌 Purpose – Modular audio transcription using Whisper-small (default), with JSON output (for DataFrame construction) and optional SRT/WAV. Auto-estimates max workers for GPU. Highly configurable for scientific pipelines.
+🔄 Latest Changes – Added model/worker/output selection, auto worker estimation, and made SRT/WAV outputs optional.
+⚙️ Key Logic – Extracts audio, splits into overlapping chunks (default 30s, 2s overlap), transcribes in parallel with Whisper-small, deduplicates segments, and outputs only requested formats.
 📂 Expected File Path – src/audio_analysis/whisper_transcribe.py
-🧠 Reasoning – Ensures both human usability (SRT), scientific, granular metadata (JSON), and reusable audio for further analysis or review, with robust handling of chunk boundaries and improved speed via GPU parallelism.
+🧠 Reasoning – Ensures fast, robust, and configurable transcription for scientific video analysis, with minimal resource waste and maximal flexibility.
 """
 
 import os
 import json
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
+
+def estimate_max_workers(model_size: str = "small", vram_gb: Optional[float] = None) -> int:
+    """
+    Estimate the maximum number of parallel Whisper processes for a given GPU and model size.
+    Args:
+        model_size (str): Whisper model size ('tiny', 'small', 'medium', 'large').
+        vram_gb (float, optional): GPU VRAM in GB. If None, auto-detects with nvidia-smi.
+    Returns:
+        int: Maximum safe number of parallel workers.
+    """
+    import subprocess
+    model_vram = {
+        'tiny': 1.2,
+        'small': 2.0,
+        'medium': 5.0,
+        'large': 10.0
+    }
+    if vram_gb is None:
+        try:
+            out = subprocess.check_output([
+                'nvidia-smi', '--query-gpu=memory.total', '--format=csv,noheader,nounits'
+            ]).decode().strip().split('\n')[0]
+            vram_gb = float(out) / 1024
+        except Exception:
+            vram_gb = 6.0  # fallback
+    per_proc = model_vram.get(model_size, 2.0)
+    max_workers = max(1, int(vram_gb // per_proc))
+    return max_workers
 
 def extract_full_audio(
     video_path: str,
@@ -88,23 +116,23 @@ def _transcribe_chunk_worker(args):
 
 def transcribe_audio_whisper_chunked(
     video_path: str,
-    model_size: str = "medium",
+    model_size: str = "small",
     device: Optional[str] = None,
     language: Optional[str] = None,
     chunk_length: float = 30.0,
     overlap: float = 2.0,
-    num_workers: int = 2
+    num_workers: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     """
     Transcribe audio from a video file using Whisper, with overlapping chunking and parallel processing for robust boundaries and fast GPU utilization.
     Args:
         video_path (str): Path to the video file.
-        model_size (str): Whisper model size (default: "medium").
+        model_size (str): Whisper model size (default: "small").
         device (str, optional): 'cuda' or 'cpu'. If None, auto-detect.
         language (str, optional): Language code for forced transcription.
         chunk_length (float): Length of each chunk in seconds.
         overlap (float): Overlap between chunks in seconds.
-        num_workers (int): Number of parallel processes for chunk transcription (default: 2). Too many may cause GPU OOM.
+        num_workers (int, optional): Number of parallel processes. If None, auto-estimate for GPU.
     Returns:
         List of segments, each a dict with start, end, text.
     Note:
@@ -114,6 +142,8 @@ def transcribe_audio_whisper_chunked(
     import shutil
     if device is None:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    if num_workers is None:
+        num_workers = estimate_max_workers(model_size)
     chunk_infos = extract_audio_chunks(video_path, chunk_length=chunk_length, overlap=overlap)
     all_segments = []
     # Prepare arguments for each chunk
@@ -137,32 +167,6 @@ def transcribe_audio_whisper_chunked(
     # Sort deduped segments by start time
     deduped.sort(key=lambda s: s["start"])
     return deduped
-
-def transcribe_audio_whisper(
-    video_path: str,
-    model_size: str = "medium",
-    device: Optional[str] = None,
-    language: Optional[str] = None,
-    chunk_length: float = 30.0,
-    overlap: float = 2.0,
-    num_workers: int = 2
-) -> List[Dict[str, Any]]:
-    """
-    Transcribe audio from a video file using Whisper, with overlapping chunking and parallel processing for robust boundaries and fast GPU utilization.
-    Args:
-        video_path (str): Path to the video file.
-        model_size (str): Whisper model size (default: "medium").
-        device (str, optional): 'cuda' or 'cpu'. If None, auto-detect.
-        language (str, optional): Language code for forced transcription.
-        chunk_length (float): Length of each chunk in seconds.
-        overlap (float): Overlap between chunks in seconds.
-        num_workers (int): Number of parallel processes for chunk transcription (default: 2). Too many may cause GPU OOM.
-    Returns:
-        List of segments, each a dict with start, end, text.
-    Note:
-        Output is segment-level (not word-level) for speed and practicality.
-    """
-    return transcribe_audio_whisper_chunked(video_path, model_size, device, language, chunk_length, overlap, num_workers)
 
 def segments_to_srt(segments: List[Dict[str, Any]]) -> str:
     """
@@ -188,43 +192,53 @@ def segments_to_srt(segments: List[Dict[str, Any]]) -> str:
 
 def save_transcription_outputs(
     segments: List[Dict[str, Any]],
-    output_prefix: str
+    output_prefix: str,
+    output_json: bool = True,
+    output_srt: bool = False
 ) -> None:
     """
     Save both SRT and JSON outputs for a transcription.
     Args:
         segments (list): List of segment dicts from Whisper.
         output_prefix (str): Path prefix for output files (no extension).
+        output_json (bool): Save JSON output (default: True).
+        output_srt (bool): Save SRT output (default: False).
     """
-    # Save SRT
-    srt_str = segments_to_srt(segments)
-    with open(f"{output_prefix}.srt", "w", encoding="utf-8") as f:
-        f.write(srt_str)
-    # Save JSON
-    with open(f"{output_prefix}.json", "w", encoding="utf-8") as f:
-        json.dump(segments, f, ensure_ascii=False, indent=2)
+    if output_srt:
+        srt_str = segments_to_srt(segments)
+        with open(f"{output_prefix}.srt", "w", encoding="utf-8") as f:
+            f.write(srt_str)
+    if output_json:
+        with open(f"{output_prefix}.json", "w", encoding="utf-8") as f:
+            json.dump(segments, f, ensure_ascii=False, indent=2)
 
 def transcribe_and_save(
     video_path: str,
     output_dir: str,
-    model_size: str = "medium",
+    model_size: str = "small",
     device: Optional[str] = None,
     language: Optional[str] = None,
     chunk_length: float = 30.0,
     overlap: float = 2.0,
-    num_workers: int = 2
+    num_workers: Optional[int] = None,
+    output_json: bool = True,
+    output_srt: bool = False,
+    output_wav: bool = False
 ) -> List[Dict[str, Any]]:
     """
-    Transcribe a video and save SRT, JSON, and full audio outputs.
+    Transcribe a video and save JSON (default), and optionally SRT/WAV outputs.
     Args:
         video_path (str): Path to the video file.
         output_dir (str): Directory to save outputs.
-        model_size (str): Whisper model size (default: "medium").
+        model_size (str): Whisper model size (default: "small").
         device (str, optional): 'cuda' or 'cpu'. If None, auto-detect.
         language (str, optional): Language code for forced transcription.
         chunk_length (float): Length of each chunk in seconds.
         overlap (float): Overlap between chunks in seconds.
-        num_workers (int): Number of parallel processes for chunk transcription (default: 2). Too many may cause GPU OOM.
+        num_workers (int, optional): Number of parallel processes. If None, auto-estimate for GPU.
+        output_json (bool): Save JSON output (default: True).
+        output_srt (bool): Save SRT output (default: False).
+        output_wav (bool): Save full audio WAV (default: False).
     Returns:
         List of segment dicts.
     """
@@ -232,9 +246,9 @@ def transcribe_and_save(
     base = os.path.splitext(os.path.basename(video_path))[0]
     output_prefix = os.path.join(output_dir, base + "_whisper")
     audio_path = os.path.join(output_dir, base + "_audio.wav")
-    # Extract and save full audio
-    extract_full_audio(video_path, audio_path)
-    # Transcribe and save SRT/JSON
-    segments = transcribe_audio_whisper(video_path, model_size, device, language, chunk_length, overlap, num_workers)
-    save_transcription_outputs(segments, output_prefix)
+    if output_wav:
+        extract_full_audio(video_path, audio_path)
+    segments = transcribe_audio_whisper_chunked(
+        video_path, model_size, device, language, chunk_length, overlap, num_workers)
+    save_transcription_outputs(segments, output_prefix, output_json=output_json, output_srt=output_srt)
     return segments 

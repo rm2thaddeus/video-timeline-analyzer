@@ -167,7 +167,7 @@ class VisualPipeline:
         """Create vector embedding for the frame."""
     
     def create_video_embedding(video_path: str) -> List[float]:
-        """Create a robust video embedding using Hugging Face TimeSformer with manual preprocessing (see DEVELOPMENT_SETUP.md)."""
+        """Create a robust video embedding using Hugging Face TimeSformer with manual preprocessing (see DEVELOPMENT_SETUP.md). Scene-level embeddings are now extracted using the Hugging Face model for all pipeline steps. The legacy/custom TimeSformer model is deprecated."""
 ```
 
 ### 2.5 Data Fusion & Scoring
@@ -191,7 +191,7 @@ class DataFusion:
                       transcripts: List[TranscriptSegment],
                       visual_metadata: Dict[Scene, VisualMetadata],
                       audio_metadata: Dict[TimeRange, AudioMetadata]) -> List[EnrichedScene]:
-        """Align all metadata by timestamp and scene boundaries."""
+        """Align all metadata by timestamp and scene boundaries. The canonical DataFrame constructor is in src/metadata/metadata_constructor.py and is robust to scene boundary formats (dicts with 'start_time'/'end_time' or lists)."""
         
     def calculate_viral_score(scene: EnrichedScene) -> float:
         """Calculate viral potential score for the scene."""

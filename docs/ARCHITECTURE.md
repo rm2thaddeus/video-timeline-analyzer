@@ -74,8 +74,9 @@ The Video Timeline Analyzer is a modular, pipeline-oriented backend application 
     - **WAV**: Optional full audio extraction (enabled by argument).
 
 ### 4.4 Visual Analysis Pipeline
-- **Purpose:** Extract semantic and emotional context from frames.
-- **Technologies:** CLIP (embeddings/tags), BLIP-2 (captioning), DeepFace (facial emotion), **Hugging Face TimeSformer (video embeddings, manual preprocessing; see DEVELOPMENT_SETUP.md)**
+- **Purpose:** Extract semantic and emotional context from frames and scenes.
+- **Technologies:** CLIP (embeddings/tags), BLIP-2 (captioning), DeepFace (facial emotion), **Hugging Face TimeSformer (scene-level video embeddings, robust manual preprocessing; see DEVELOPMENT_SETUP.md)**
+- **Implementation Note:** The pipeline now uses Hugging Face TimeSformer for all scene-level embedding extraction, ensuring maintainability and reproducibility. The legacy/custom TimeSformer model is deprecated.
 
 ### 4.5 Metadata DataFrame Construction (Central Step)
 - **Purpose:** Parse and align all pipeline outputs (scenes, transcripts, frames, embeddings, etc.) into a single DataFrame with variable granularity.
@@ -86,6 +87,7 @@ The Video Timeline Analyzer is a modular, pipeline-oriented backend application 
     - **Audio JSON output**: Each transcript segment (from Whisper) is a dict with start, end, text, and optionally word-level details, enabling precise alignment and flexible DataFrame construction.
     - Alignment logic is parameterized and documented
     - DataFrame is persisted (e.g., Parquet) for reproducibility
+    - **Implementation:** The canonical DataFrame constructor is in `src/metadata/metadata_constructor.py` and is robust to scene boundary formats (dicts with 'start_time'/'end_time' or lists).
 
 ### 4.6 Qdrant Vector Database Integration
 - **Purpose:** Store each scene as a point in Qdrant, with multi-vector support (text/image embeddings) and all other metadata as payload.

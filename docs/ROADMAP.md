@@ -79,13 +79,14 @@ This roadmap defines the phases and milestones for the de-novo-windows branch, f
 
 **Current State:**
 - Visual embedding extraction now uses a robust, manually preprocessed Hugging Face TimeSformer module (see DEVELOPMENT_SETUP.md). This avoids dependency on processor classes and ensures future compatibility.
+- **The legacy/custom TimeSformer model is deprecated. All scene-level embeddings are now extracted using the Hugging Face model for maintainability and reproducibility.**
 
 **Why:**
 - This approach provides a reliable and consistent method for embedding extraction, which is crucial for various downstream tasks.
 
 **Recommended Workflow:**
-1. Use the embedding extraction module in `src/visual_analysis/embedding_extraction.py`.
-2. Run on any video in the `data` directory; outputs will be saved in the `embedding_extraction` output directory.
+1. Use the embedding extraction module in `src/visual_analysis/timesformer_analysis.py` (Hugging Face TimeSformer).
+2. Run on any video in the `data` directory; outputs will be saved in the `temp` output directory (or as specified).
 
 **Pipeline Compatibility Note:**
 - The modular approach ensures compatibility with the rest of the backend pipeline and future UI work.
@@ -191,7 +192,7 @@ To ensure full GPU acceleration, reproducibility, and access to the latest scien
     - [x] Scene detection (PyTorch-only, TransNet V2)
     - [x] Audio analysis (modular, dual output: SRT + JSON, DataFrame-ready)
     - [x] Visual embedding extraction now uses a robust, manually preprocessed Hugging Face TimeSformer module (see DEVELOPMENT_SETUP.md)
-    - [ ] Metadata/DataFrame construction
+    - [x] Metadata/DataFrame construction (robust, modular, and Windows-native; see `src/metadata/metadata_constructor.py`)
     - [ ] Database (Qdrant) integration
 - [ ] Write initial unit tests in `tests/`
 - [ ] Ensure all code follows project rules for modularity, documentation, and reproducibility
