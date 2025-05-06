@@ -39,7 +39,7 @@ def setup_logging(log_path):
     return logger
 
 # --- MAIN PIPELINE FUNCTION ---
-def run_pipeline(video_path, output_root=DEFAULT_OUTPUT_ROOT, collection_name="video_scenes", vector_size=768):
+def run_pipeline(video_path, output_root=DEFAULT_OUTPUT_ROOT, collection_name="video_scenes", vector_size=768, num_workers=4):
     video_path = Path(video_path)
     video_stem = video_path.stem.replace(" ", "_")
     out_dir = Path(output_root) / video_stem
@@ -61,7 +61,8 @@ def run_pipeline(video_path, output_root=DEFAULT_OUTPUT_ROOT, collection_name="v
             str(video_path),
             str(out_dir),
             "--save_json", "True",
-            "--device", "cuda" if cuda_available else "cpu"
+            "--device", "cuda" if cuda_available else "cpu",
+            "--num_workers", str(num_workers)
         ], capture_output=True, text=True, check=True)
         logger.info(result.stdout)
         if result.stderr:
@@ -145,5 +146,6 @@ if __name__ == "__main__":
     parser.add_argument("--output_root", type=str, default=DEFAULT_OUTPUT_ROOT, help="Root directory for outputs.")
     parser.add_argument("--collection_name", type=str, default="video_scenes", help="Qdrant collection name.")
     parser.add_argument("--vector_size", type=int, default=768, help="Embedding vector size.")
+    parser.add_argument("--num_workers", type=int, default=4, help="Number of workers for scene detection (lower if FFmpeg/OpenCV errors occur).")
     args = parser.parse_args()
-    run_pipeline(args.video_path, args.output_root, args.collection_name, args.vector_size) 
+    run_pipeline(args.video_path, args.output_root, args.collection_name, args.vector_size, args.num_workers) 
