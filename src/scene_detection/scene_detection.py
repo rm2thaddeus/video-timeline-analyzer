@@ -1,9 +1,9 @@
 """
 📌 Purpose – Modular scene detection interface for the backend pipeline. Uses only TransNet V2 (PyTorch) for scene detection, with parallelized frame extraction and robust output.
-🔄 Latest Changes – Refactored to remove TensorFlow/PySceneDetect, output both frame and time boundaries, parallelized frame extraction, and save results as CSV and JSON.
-⚙️ Key Logic – Uses torch.cuda.is_available() to select GPU, parallelizes frame extraction, and outputs scene boundaries in frames and seconds.
+🔄 Latest Changes – Refactored for thread-safe frame extraction (per-worker VideoCapture), batched inference, and integrated profiling utility.
+⚙️ Key Logic – Each worker opens its own VideoCapture, batches frames for inference, and profiles resource usage.
 📂 Expected File Path – src/scene_detection/scene_detection.py
-🧠 Reasoning – Ensures fast, accurate, and hardware-aware scene detection in a modular, backend-first pipeline, with robust output for downstream use.
+🧠 Reasoning – Ensures fast, accurate, and hardware-aware scene detection with robust profiling for optimization.
 """
 
 import os
@@ -15,47 +15,16 @@ import json
 import csv
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any
+import psutil
+import platform
+from src.utils.profiling import profile_stage
 
-def detect_scenes(video_path: str, output_dir: str, batch_size: int = 100, threshold: float = 0.5, min_scene_len: int = 15, num_workers: int = 4, save_json: bool = True, save_csv: bool = False, **kwargs) -> List[Dict[str, Any]]:
-    """
-    Detect scenes in a video using TransNet V2 (PyTorch).
-    Args:
-        video_path (str): Path to the video file.
-        output_dir (str): Directory to save scene detection outputs.
-        batch_size (int, optional): Number of frames per batch for inference. Default is 100.
-        threshold (float, optional): Threshold for scene boundary detection.
-        min_scene_len (int, optional): Minimum length of a scene in frames.
-        num_workers (int, optional): Number of threads for parallel frame extraction.
-        save_json (bool, optional): Whether to save results as JSON. Default is True.
-        save_csv (bool, optional): Whether to save results as CSV. Default is False.
-        **kwargs: Additional arguments for backend-specific options.
-    Returns:
-        List of dicts with scene boundaries (frame and time).
-    """
-    scenes = detect_scenes_transnetv2_pytorch(
-        video_path, output_dir, batch_size=batch_size, threshold=threshold, min_scene_len=min_scene_len, num_workers=num_workers
-    )
-    # Save results
-    os.makedirs(output_dir, exist_ok=True)
-    base = os.path.splitext(os.path.basename(video_path))[0]
-    if save_json:
-        json_path = os.path.join(output_dir, f"{base}_scenes.json")
-        with open(json_path, "w") as f:
-            json.dump(scenes, f, indent=2)
-    if save_csv:
-        csv_path = os.path.join(output_dir, f"{base}_scenes.csv")
-        with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["start_frame", "end_frame", "start_time", "end_time"])
-            writer.writeheader()
-            for scene in scenes:
-                writer.writerow(scene)
-    print(f"[SceneDetection] Detected {len(scenes)} scenes for {video_path}")
-    return scenes
-
-def _extract_frame(args):
-    cap, idx = args
+def _extract_frame_worker(args):
+    video_path, idx = args
+    cap = cv2.VideoCapture(video_path)
     cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
     ret, frame = cap.read()
+    cap.release()
     if not ret:
         return None
     frame_resized = cv2.resize(frame, (48, 27))
@@ -71,19 +40,6 @@ def _get_fps_and_nframes(video_path: str):
     return fps, n_frames
 
 def detect_scenes_transnetv2_pytorch(video_path: str, output_dir: str, batch_size: int = 100, threshold: float = 0.5, min_scene_len: int = 15, num_workers: int = 4, **kwargs) -> List[Dict[str, Any]]:
-    """
-    Detect scenes using TransNet V2 (PyTorch, GPU-accelerated).
-    Args:
-        video_path (str): Path to the video file.
-        output_dir (str): Directory to save outputs.
-        batch_size (int): Number of frames per batch for inference.
-        threshold (float): Threshold for scene boundary detection.
-        min_scene_len (int): Minimum length of a scene in frames.
-        num_workers (int): Number of threads for parallel frame extraction.
-        **kwargs: Additional options for TransNet V2.
-    Returns:
-        List of dicts with scene boundaries (frame and time).
-    """
     sys.path.append(os.path.join(os.path.dirname(__file__), "transnetv2_repo", "inference-pytorch"))
     from transnetv2_pytorch import TransNetV2
 
@@ -107,11 +63,9 @@ def detect_scenes_transnetv2_pytorch(video_path: str, output_dir: str, batch_siz
         print(f"[TransNetV2-PyTorch] No frames found in {video_path}.")
         return []
 
-    # Parallel frame extraction
-    cap = cv2.VideoCapture(video_path)
+    # Parallel, thread-safe frame extraction
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        frames = list(executor.map(_extract_frame, [(cap, idx) for idx in range(n_frames)]))
-    cap.release()
+        frames = list(executor.map(_extract_frame_worker, [(video_path, idx) for idx in range(n_frames)]))
     frames = [f for f in frames if f is not None]
     frames = np.array(frames, dtype=np.uint8)
     n_frames = len(frames)
@@ -126,7 +80,7 @@ def detect_scenes_transnetv2_pytorch(video_path: str, output_dir: str, batch_siz
     model.to(device)
     model.eval()
 
-    # Batch inference
+    # Batched inference
     all_preds = []
     with torch.no_grad():
         for i in range(0, n_frames, batch_size):
@@ -154,15 +108,6 @@ def detect_scenes_transnetv2_pytorch(video_path: str, output_dir: str, batch_siz
     return scene_dicts
 
 def predictions_to_scenes(predictions: np.ndarray, threshold: float = 0.5, min_scene_len: int = 15) -> List[tuple]:
-    """
-    Convert model predictions to scene boundaries.
-    Args:
-        predictions (np.ndarray): 1D array of probabilities per frame.
-        threshold (float): Probability threshold for scene boundary.
-        min_scene_len (int): Minimum length of a scene in frames.
-    Returns:
-        List of (start_frame, end_frame) tuples.
-    """
     boundaries = np.where(predictions > threshold)[0]
     if len(boundaries) == 0:
         return [(0, len(predictions)-1)]
@@ -174,6 +119,93 @@ def predictions_to_scenes(predictions: np.ndarray, threshold: float = 0.5, min_s
             prev = b
     if prev < len(predictions)-1:
         scenes.append((prev, len(predictions)-1))
+    return scenes
+
+def detect_scenes(video_path: str, output_dir: str, batch_size: int = 100, threshold: float = 0.5, min_scene_len: int = 15, num_workers: int = 4, save_json: bool = True, save_csv: bool = False, **kwargs) -> List[Dict[str, Any]]:
+    from src.utils.profiling import profile_stage
+    with profile_stage("scene_detection"):
+        scenes = detect_scenes_transnetv2_pytorch(
+            video_path, output_dir, batch_size=batch_size, threshold=threshold, min_scene_len=min_scene_len, num_workers=num_workers
+        )
+    # Save results
+    os.makedirs(output_dir, exist_ok=True)
+    base = os.path.splitext(os.path.basename(video_path))[0]
+    if save_json:
+        json_path = os.path.join(output_dir, f"{base}_scenes.json")
+        with open(json_path, "w") as f:
+            json.dump(scenes, f, indent=2)
+    if save_csv:
+        csv_path = os.path.join(output_dir, f"{base}_scenes.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["start_frame", "end_frame", "start_time", "end_time"])
+            writer.writeheader()
+            for scene in scenes:
+                writer.writerow(scene)
+    print(f"[SceneDetection] Detected {len(scenes)} scenes for {video_path}")
+    return scenes
+
+def detect_scenes_all_in_memory(video_path: str, output_dir: str, batch_size: int = 100, threshold: float = 0.5, min_scene_len: int = 15, save_json: bool = True, save_csv: bool = False, device: str = None, **kwargs):
+    """
+    Detect scenes by loading all frames into memory, then running inference in one batch (de-novo style).
+    Args:
+        video_path (str): Path to the video file.
+        output_dir (str): Directory to save outputs.
+        batch_size (int): Batch size for inference (not used, all frames in one batch).
+        threshold (float): Threshold for scene boundary detection.
+        min_scene_len (int): Minimum length of a scene in frames.
+        save_json (bool): Save results as JSON.
+        save_csv (bool): Save results as CSV.
+        device (str): 'cuda' or 'cpu'.
+    """
+    sys.path.append(os.path.join(os.path.dirname(__file__), "transnetv2_repo", "inference-pytorch"))
+    from transnetv2_pytorch import TransNetV2
+
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    weights_path = os.path.join(os.path.dirname(__file__), "transnetv2_repo", "inference-pytorch", "transnetv2-pytorch-weights.pth")
+    model = TransNetV2()
+    state_dict = torch.load(weights_path, map_location=device)
+    model.load_state_dict(state_dict)
+    model.to(device)
+    model.eval()
+
+    # Load all frames into memory
+    cap = cv2.VideoCapture(video_path)
+    frames = []
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame_resized = cv2.resize(frame, (48, 27))
+        frames.append(frame_resized)
+    cap.release()
+    frames = np.array(frames, dtype=np.uint8)
+    print(f"[AllInMemory] Loaded {len(frames)} frames into memory. RAM usage: {psutil.virtual_memory().percent}%")
+
+    # Run inference in one batch
+    with torch.no_grad():
+        batch_tensor = torch.from_numpy(frames).unsqueeze(0).to(device)  # [1, T, 27, 48, 3]
+        single_frame_pred, _ = model(batch_tensor)
+        predictions = torch.sigmoid(single_frame_pred).cpu().numpy()[0, :, 0]
+
+    # Post-process predictions to scene boundaries
+    scenes = predictions_to_scenes(predictions, threshold=threshold, min_scene_len=min_scene_len)
+    # Save results
+    os.makedirs(output_dir, exist_ok=True)
+    base = os.path.splitext(os.path.basename(video_path))[0] + "_allinmem"
+    if save_json:
+        json_path = os.path.join(output_dir, f"{base}_scenes.json")
+        with open(json_path, "w") as f:
+            import json
+            json.dump([{'start_frame': int(s[0]), 'end_frame': int(s[1])} for s in scenes], f, indent=2)
+    if save_csv:
+        csv_path = os.path.join(output_dir, f"{base}_scenes.csv")
+        import csv
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["start_frame", "end_frame"])
+            writer.writeheader()
+            for s in scenes:
+                writer.writerow({"start_frame": int(s[0]), "end_frame": int(s[1])})
+    print(f"[AllInMemory] Detected {len(scenes)} scenes for {video_path}")
     return scenes
 
 if __name__ == "__main__":
@@ -188,28 +220,40 @@ if __name__ == "__main__":
     parser.add_argument("--save_json", type=lambda x: (str(x).lower() == 'true'), default=True, help="Save results as JSON.")
     parser.add_argument("--save_csv", type=lambda x: (str(x).lower() == 'true'), default=False, help="Save results as CSV.")
     parser.add_argument("--device", type=str, default=None, choices=["cuda", "cpu", None], help="Device to use ('cuda' or 'cpu').")
+    parser.add_argument("--mode", type=str, default="threaded", choices=["threaded", "all_in_memory"], help="Scene detection mode.")
     args = parser.parse_args()
 
-    # Set device if specified
-    if args.device:
-        import torch
-        if args.device == "cuda" and not torch.cuda.is_available():
-            print("[SceneDetection] CUDA requested but not available. Falling back to CPU.")
-            device = "cpu"
-        else:
-            device = args.device
+    if args.mode == "all_in_memory":
+        detect_scenes_all_in_memory(
+            video_path=args.video_path,
+            output_dir=args.output_dir,
+            batch_size=args.batch_size,
+            threshold=args.threshold,
+            min_scene_len=args.min_scene_len,
+            save_json=args.save_json,
+            save_csv=args.save_csv,
+            device=args.device
+        )
     else:
-        import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    detect_scenes(
-        video_path=args.video_path,
-        output_dir=args.output_dir,
-        batch_size=args.batch_size,
-        threshold=args.threshold,
-        min_scene_len=args.min_scene_len,
-        num_workers=args.num_workers,
-        save_json=args.save_json,
-        save_csv=args.save_csv,
-        device=device
-    ) 
+        # Existing threaded approach
+        if args.device:
+            import torch
+            if args.device == "cuda" and not torch.cuda.is_available():
+                print("[SceneDetection] CUDA requested but not available. Falling back to CPU.")
+                device = "cpu"
+            else:
+                device = args.device
+        else:
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        detect_scenes(
+            video_path=args.video_path,
+            output_dir=args.output_dir,
+            batch_size=args.batch_size,
+            threshold=args.threshold,
+            min_scene_len=args.min_scene_len,
+            num_workers=args.num_workers,
+            save_json=args.save_json,
+            save_csv=args.save_csv,
+            device=device
+        ) 

@@ -14,6 +14,7 @@ import pandas as pd
 from pathlib import Path
 import logging
 import torch
+import json
 
 # --- CONFIGURABLE PARAMETERS ---
 DEFAULT_OUTPUT_ROOT = "data/outputs"
@@ -54,6 +55,7 @@ def run_pipeline(video_path, output_root=DEFAULT_OUTPUT_ROOT, collection_name="v
 
     # 1. Scene Detection
     scene_json = out_dir / f"{video_stem}_scenes.json"
+    scene_profile_json = out_dir / f"{video_stem}_scene_detection_profile.json"
     logger.info("[Pipeline] Running scene detection...")
     try:
         result = subprocess.run([
@@ -74,11 +76,8 @@ def run_pipeline(video_path, output_root=DEFAULT_OUTPUT_ROOT, collection_name="v
 
     # 2. Audio Transcription
     whisper_json = out_dir / f"{video_stem}_whisper.json"
+    whisper_profile_json = out_dir / f"{video_stem}_whisper_transcription_profile.json"
     logger.info("[Pipeline] Running audio transcription...")
-    # Estimate max workers for Whisper
-    from src.audio_analysis.whisper_transcribe import estimate_max_workers
-    max_workers = estimate_max_workers(model_size="small")
-    logger.info(f"Whisper max_workers: {max_workers} (device: {'cuda' if cuda_available else 'cpu'})")
     try:
         result = subprocess.run([
             sys.executable, WHISPER_SCRIPT,
@@ -86,8 +85,7 @@ def run_pipeline(video_path, output_root=DEFAULT_OUTPUT_ROOT, collection_name="v
             "--output_dir", str(out_dir),
             "--output_json", "True",
             "--output_srt", "False",
-            "--device", "cuda" if cuda_available else "cpu",
-            "--num_workers", str(max_workers)
+            "--device", "cuda" if cuda_available else "cpu"
         ], capture_output=True, text=True, check=True)
         logger.info(result.stdout)
         if result.stderr:
@@ -99,6 +97,7 @@ def run_pipeline(video_path, output_root=DEFAULT_OUTPUT_ROOT, collection_name="v
 
     # 3. Embedding Extraction
     embeddings_json = out_dir / f"{video_stem}_embeddings.json"
+    embed_profile_json = out_dir / f"{video_stem}_timesformer_embedding_profile.json"
     logger.info("[Pipeline] Running visual embedding extraction...")
     try:
         result = subprocess.run([
@@ -135,6 +134,25 @@ def run_pipeline(video_path, output_root=DEFAULT_OUTPUT_ROOT, collection_name="v
     wrapper = QdrantClientWrapper(collection_name=collection_name, vector_size=vector_size)
     wrapper.ingest_dataframe(df)
     logger.info("[Pipeline] Ingestion complete.")
+
+    # --- Profiling Summary ---
+    logger.info("[Pipeline] Profiling Summary:")
+    def try_load_profile(profile_path):
+        if profile_path.exists():
+            with open(profile_path, 'r') as f:
+                return json.load(f)
+        return None
+    profiles = {
+        'Scene Detection': try_load_profile(scene_profile_json),
+        'Whisper Transcription': try_load_profile(whisper_profile_json),
+        'Timesformer Embedding': try_load_profile(embed_profile_json)
+    }
+    logger.info("\n| Stage | Time (s) | CPU Mem (MB) | GPU Mem (MB) |\n|-------|----------|--------------|--------------|")
+    for stage, prof in profiles.items():
+        if prof:
+            logger.info(f"| {stage} | {prof['time_sec']:.2f} | {prof['cpu_mem_mb']:.2f} | {prof['gpu_mem_mb']:.2f} |")
+        else:
+            logger.info(f"| {stage} | N/A | N/A | N/A |")
 
     logger.info(f"[Pipeline] All outputs in: {out_dir}")
     return out_dir
