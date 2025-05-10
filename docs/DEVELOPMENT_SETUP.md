@@ -1,4 +1,15 @@
+/*
+📌 Purpose – This document provides detailed setup instructions for the Video Timeline Analyzer, with emphasis on GPU configuration, dependency management, and disk space considerations.
+🔄 Latest Changes – Updated to reflect hardware constraints: Docker integration with large frameworks (PyTorch, TensorFlow) is currently infeasible due to disk space. Added recommendations for lightweight CUDA alternatives (CuPy, Numba) and rationale for minimizing dependencies while retaining GPU acceleration.
+⚙️ Key Logic – Step-by-step setup for Windows-native development, with notes on minimizing dependencies and Docker image size.
+📂 Expected File Path – docs/DEVELOPMENT_SETUP.md
+🧠 Reasoning – Ensures contributors are aware of hardware constraints and can set up a functional environment with minimal dependencies.
+*/
+
 # Development Environment Setup
+
+> **Note (2024-06):**
+> Due to hardware constraints, Docker integration with large frameworks (PyTorch, TensorFlow) is not currently feasible. The project aims to minimize dependencies while retaining GPU acceleration. Consider using lightweight CUDA alternatives such as CuPy or Numba for GPU-accelerated tasks that do not require full deep learning frameworks. This approach reduces disk usage and increases portability, but may require more manual management of GPU operations. Docker support may be revisited if hardware resources improve.
 
 This guide provides detailed instructions for setting up the development environment for the Video Timeline Analyzer project, with special emphasis on GPU configuration and dependency management for Windows-native development.
 
@@ -157,3 +168,19 @@ To test, run:
 ```bash
 python scripts/test_hf_timesformer_embedding.py
 ```
+
+## Docker Build Experience & Image Size
+
+During the initial Docker build for the GPU-accelerated pipeline, the resulting image size exceeded 35GB. This was primarily due to the inclusion of large dependencies (CUDA, PyTorch, OpenCV, etc.) and the lack of intermediate cleanup steps.
+
+To address this, pruning and cleanup commands were added to the Dockerfile (e.g., `apt-get clean`, `rm -rf /var/lib/apt/lists/* /root/.cache/pip`) to reduce image bloat. These steps are now standard in the build process and are enforced by the Cursor Project Rules (see `.cursor/rules/cursorrules.mdc`).
+
+**Best Practices:**
+- Always include cleanup commands after installing system or Python dependencies.
+- Regularly review the Dockerfile for unnecessary layers or files.
+- Refer to the Cursor Project Rules for up-to-date recommendations on image optimization and reproducibility.
+
+**Note:** Even with pruning, the image may remain large due to the nature of scientific GPU workloads. Consider using volume mounts for data and outputs to avoid further increasing image size.
+
+> **Additional Note (2024-06):**
+> If disk space is a limiting factor, consider omitting large frameworks (PyTorch, TensorFlow) from your Docker builds and using lightweight CUDA libraries (CuPy, Numba) where possible. This can significantly reduce image size and make Docker integration more feasible on constrained hardware. Reassess project requirements to determine if full deep learning frameworks are necessary for your use case.

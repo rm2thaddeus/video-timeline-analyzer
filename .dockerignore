@@ -1,0 +1,21 @@
+# Exclude data and large files
+/data/
+
+# Exclude git history
+.git/
+
+# Exclude Python cache and build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.tar.gz
+*.whl
+*.egg-info/
+.DS_Store
+
+# Exclude OS and editor files
+*.swp
+*.swo
+*.bak
+*.tmp 

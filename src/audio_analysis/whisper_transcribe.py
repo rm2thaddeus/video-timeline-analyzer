@@ -33,11 +33,18 @@ class WhisperTranscriber:
         return out
 
     def transcribe_chunk(self, audio_bytes: bytes, chunk_start: float, language: Optional[str] = None) -> List[Dict[str, Any]]:
-        import numpy as np
         import whisper
-        # Whisper expects a file path or numpy array; decode WAV bytes to numpy
-        audio = whisper.audio.load_audio(BytesIO(audio_bytes))
-        result = self.model.transcribe(audio, language=language, verbose=False)
+        import tempfile
+        import os
+        # Write bytes to a temp file and pass the path directly to Whisper
+        tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+        try:
+            tmp.write(audio_bytes)
+            tmp.flush()
+            tmp.close()
+            result = self.model.transcribe(tmp.name, language=language, verbose=False)
+        finally:
+            os.unlink(tmp.name)
         segments = []
         for seg in result["segments"]:
             seg = seg.copy()
@@ -135,4 +142,39 @@ def transcribe_and_save(
             video_path, chunk_length=chunk_length, overlap=overlap, language=language
         )
     save_transcription_outputs(segments, output_prefix, output_json=output_json, output_srt=output_srt)
-    return segments 
+    return segments
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+    parser = argparse.ArgumentParser(description="Transcribe audio from video using Whisper with in-memory chunking and profiling.")
+    parser.add_argument("video_path", type=str, help="Path to input video file.")
+    parser.add_argument("--output_dir", type=str, required=True, help="Directory to save outputs.")
+    parser.add_argument("--model_size", type=str, default="small", help="Whisper model size (default: small)")
+    parser.add_argument("--device", type=str, default=None, help="Device to use ('cuda' or 'cpu').")
+    parser.add_argument("--language", type=str, default=None, help="Language code for forced transcription.")
+    parser.add_argument("--chunk_length", type=float, default=30.0, help="Length of each chunk in seconds.")
+    parser.add_argument("--overlap", type=float, default=2.0, help="Overlap between chunks in seconds.")
+    parser.add_argument("--output_json", type=lambda x: (str(x).lower() == 'true'), default=True, help="Save JSON output (default: True).")
+    parser.add_argument("--output_srt", type=lambda x: (str(x).lower() == 'true'), default=False, help="Save SRT output (default: False).")
+    parser.add_argument("--output_wav", type=lambda x: (str(x).lower() == 'true'), default=False, help="Save full audio WAV (default: False).")
+    args = parser.parse_args()
+    try:
+        segments = transcribe_and_save(
+            video_path=args.video_path,
+            output_dir=args.output_dir,
+            model_size=args.model_size,
+            device=args.device,
+            language=args.language,
+            chunk_length=args.chunk_length,
+            overlap=args.overlap,
+            output_json=args.output_json,
+            output_srt=args.output_srt,
+            output_wav=args.output_wav
+        )
+        base = os.path.splitext(os.path.basename(args.video_path))[0]
+        output_prefix = os.path.join(args.output_dir, base + "_whisper.json")
+        print(f"[WhisperTranscribe] Success. Output: {output_prefix}")
+    except Exception as e:
+        print(f"[WhisperTranscribe] ERROR: {e}", file=sys.stderr)
+        sys.exit(1) 

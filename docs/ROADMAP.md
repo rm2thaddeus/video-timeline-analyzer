@@ -1,19 +1,39 @@
 /*
 📌 Purpose – Defines the phased, documentation-first roadmap for the de-novo-windows branch of the Video Timeline Analyzer.
-🔄 Latest Changes – Clarified Windows-native focus; removed WSL2/Linux as default; emphasized modular, pipeline-oriented backend and PyTorch-only scene detection.
+🔄 Latest Changes – Emphasized pipeline efficiency as the current focus; updated introduction and next steps to reflect this priority; clarified phase order. Updated to reflect hardware constraints: Docker integration with large frameworks (PyTorch, TensorFlow) is currently infeasible due to disk space. Added recommendations for lightweight CUDA alternatives (CuPy, Numba) and rationale for minimizing dependencies while retaining GPU acceleration.
 🔄 2024-06: Windows development is now the mainline; Hugging Face weights integration and reproducible download script for TransNetV2 PyTorch weights. Documented hardware-agnostic model loading for Windows.
-⚙️ Key Logic – Backend development is prioritized, with modular scene detection (TransNet V2, PyTorch-only, hardware-agnostic).
+⚙️ Key Logic – Backend development is prioritized, with modular scene detection (TransNet V2, PyTorch-only, hardware-agnostic), followed by systematic pipeline optimization and then database integration.
 📂 Expected File Path – docs/ROADMAP.md
-🧠 Reasoning – Ensures a rigorous, reproducible, and maintainable backend foundation for Windows-native development before any UI work.
+🧠 Reasoning – Ensures a rigorous, reproducible, and maintainable backend foundation for Windows-native development, with optimization and profiling preceding database integration for maximum efficiency and clarity.
 */
+
+> **Current Focus:**
+> 
+> 🚀 Maximizing the efficiency of the backend pipeline (profiling, optimization, and resource management) is the immediate and sole project priority. All other development (including database integration) will resume only after this phase is complete.
+
+> **Note (2024-06):**
+> Due to hardware constraints, Docker integration with large frameworks (PyTorch, TensorFlow) is not currently feasible. The project aims to minimize dependencies while retaining GPU acceleration. Consider using lightweight CUDA alternatives such as CuPy or Numba for GPU-accelerated tasks that do not require full deep learning frameworks. This approach reduces disk usage and increases portability, but may require more manual management of GPU operations. Docker support may be revisited if hardware resources improve.
 
 # Project Roadmap (De-Novo-Windows Branch)
 
 ## Overview
 
-This roadmap defines the phases and milestones for the de-novo-windows branch, focusing on backend development for **Windows-native** environments (no WSL2 or Linux required). The goal is a modular, pipeline-oriented backend for scientific video analysis, with PyTorch-only scene detection (TransNet V2).
+This roadmap defines the phases and milestones for the de-novo-windows branch, focusing on backend development for **Windows-native** environments (no WSL2 or Linux required). The current and immediate focus is on maximizing the efficiency of the backend pipeline through systematic profiling, optimization, and resource management. All other work, including database integration, will follow only after this phase is complete.
 
 **Note:** This project is being developed by a single scientist-developer, with a focus on learning, fun, and leveraging AI/code assistants to minimize manual coding. The process is designed to be enjoyable and educational, not just productive.
+
+## Development Process & Current Status
+
+The development process has involved several major transitions and lessons learned:
+
+- **Transition from WSL2 to Windows-Native & Docker:** Initial attempts to use WSL2 for development led to significant disk space consumption and complexity. The project has since moved to a Windows-native workflow, leveraging Docker containers for reproducibility and GPU acceleration.
+- **Docker Image Size & Pruning:** Building a GPU-accelerated Docker image (with CUDA, PyTorch, OpenCV) resulted in an image size exceeding 35GB. This highlighted the need for aggressive pruning and cleanup (e.g., `apt-get clean`, removing pip/apt caches) to manage disk usage. These steps are now standard and enforced by the Cursor Project Rules.
+- **Hardware Constraints & Alternatives:** If disk space is a limiting factor, consider omitting large frameworks (PyTorch, TensorFlow) from your Docker builds and using lightweight CUDA libraries (CuPy, Numba) where possible. This can significantly reduce image size and make Docker integration more feasible on constrained hardware. Reassess project requirements to determine if full deep learning frameworks are necessary for your use case.
+- **Exclusion of TensorFlow & WSL2:** TensorFlow and WSL2 were explicitly excluded from the pipeline due to their large disk footprint, compatibility issues, and lack of necessity for the current PyTorch-based workflow. All deep learning modules are now PyTorch-only, ensuring a unified and efficient backend.
+- **Disk Space Management:** Lessons from WSL2 and Docker image bloat have led to the adoption of best practices for disk and image management, now documented in DEVELOPMENT_SETUP.md and enforced by project rules.
+- **Current Status:** The project is now fully Docker-based, GPU-accelerated, and Windows-native, with explicit pruning and cleanup in all build processes. All contributors are encouraged to follow the Cursor Project Rules for reproducibility and efficiency.
+
+For detailed setup and best practices, see [DEVELOPMENT_SETUP.md](DEVELOPMENT_SETUP.md) and the Cursor Project Rules.
 
 ## Scene Detection: PyTorch (TransNetV2) Windows-Native Status
 
@@ -193,12 +213,66 @@ To ensure full GPU acceleration, reproducibility, and access to the latest scien
     - [x] Audio analysis (modular, dual output: SRT + JSON, DataFrame-ready)
     - [x] Visual embedding extraction now uses a robust, manually preprocessed Hugging Face TimeSformer module (see DEVELOPMENT_SETUP.md)
     - [x] Metadata/DataFrame construction (robust, modular, and Windows-native; see `src/metadata/metadata_constructor.py`)
-    - [ ] Database (Qdrant) integration
 - [ ] Write initial unit tests in `tests/`
 - [ ] Ensure all code follows project rules for modularity, documentation, and reproducibility
 - [ ] Commit and push all changes with clear, descriptive messages
 
 **Milestone:** Core backend modules bootstrapped and under version control, ready for iterative development.
+
+---
+
+## Phase 5: Pipeline Optimization & Profiling
+
+**Goal:** Maximize pipeline efficiency, GPU utilization, and scientific reproducibility through systematic profiling, refactoring, and reporting.
+
+### 1. Audit & Profile the Existing Pipeline
+- Use `torch.profiler` (GPU) and `psutil` (CPU/RAM) to capture end-to-end metrics: time per stage, memory peaks, I/O wait.
+- Produce a short report (table or chart) showing where most time and memory are spent.
+- Validate current behavior:
+    - Confirm chunk files are written to disk.
+    - Confirm VideoCapture is shared or not.
+    - Confirm scene inference is serial.
+    - Note any errors or OOM spikes on 6GB GPU.
+
+### 2. Refactor Whisper Transcription
+- Move `whisper.load_model(...)` out of worker functions to load once into GPU.
+- Replace disk-based chunking with in-memory FFmpeg pipes (`.output('pipe:', format='wav') → BytesIO`).
+- Explore Whisper's batch API or overlapping segments in a single forward call.
+- Validate that GPU stays active (no idle gaps).
+
+### 3. Improve Frame Extraction & Scene Detection
+- Ensure thread-safe video reads: each worker gets its own `cv2.VideoCapture(video_path)`.
+- Investigate `cv2.cuda` or NVIDIA DALI for zero-copy decoding and resizing.
+- Compare throughput vs. CPU-only resizing; select the faster approach.
+
+### 4. Optimize TimeSformer Inference
+- Batch scenes using a Dataset and DataLoader (`batch_size=16`, `pin_memory=True`, `num_workers=4`).
+- Use `model.half().to(device)` and convert inputs to half-precision before inference.
+- Use non-blocking CUDA streams to overlap data transfer and compute.
+- Measure and report performance gains.
+
+### 5. Parallelism & Resource Management
+- Consolidate ffmpeg calls to reduce process-spawn overhead.
+- Offload simple, CPU-bound loops (e.g., segment merging) to Numba or CuPy for GPU acceleration.
+
+### 6. Reporting & Documentation
+- After each refactor, produce a mini-report showing "before vs after" timings and memory usage.
+- Ensure all code changes are clean, modular, and well-documented, with comments explaining the rationale.
+- Summarize findings and recommend any large-scale architecture shifts (e.g., full DALI pipeline, Triton Inference Server).
+
+**Milestone:** Pipeline is fully profiled, optimized, and documented, with measurable improvements and clear recommendations for future scaling.
+
+---
+
+## Phase 6: Database (Qdrant) Integration & Finalization
+
+- [ ] Integrate Qdrant vector database for scene and embedding storage
+- [ ] Implement robust, modular ingestion of DataFrame outputs into Qdrant
+- [ ] Ensure compatibility with optimized pipeline and Windows-native environment
+- [ ] Write unit and integration tests for database operations
+- [ ] Update documentation to reflect database integration and usage
+
+**Milestone:** Database integration complete, with all backend modules optimized, profiled, and ready for downstream applications.
 
 ---
 
@@ -228,13 +302,10 @@ To ensure full GPU acceleration, reproducibility, and access to the latest scien
 
 ## Next Logical Step
 
-**Ensure Cursor and Code Assistant Plugins Operate in Windows**
-- To guarantee all code generation, automation, and AI-assisted development occurs in the correct (GPU-accelerated, Windows-native) environment, make sure Cursor and any code assistant plugins are running in your Windows shell.
-- **How to do this:**
-  - Open your project folder in VSCode or Cursor on Windows.
-  - Confirm that the integrated terminal and all code execution are happening in the Windows environment (you should see your Windows username and path in the prompt, e.g., `C:\Users\aitor>`).
-  - If using plugins, ensure they are enabled and configured for the Windows context.
-- This step is essential for reproducibility, full GPU acceleration, and seamless scientific development.
+**Current Focus: Maximize Pipeline Efficiency**
+- The immediate next step is to profile, optimize, and maximize the throughput and resource utilization of the backend pipeline.
+- All other planned modifications, including Qdrant/database integration, are paused until pipeline efficiency work is complete.
+- This ensures that the foundation is robust, efficient, and ready for scalable downstream applications.
 
 *This step ensures that all future development, automation, and troubleshooting are performed in the intended environment, maximizing reliability and scientific rigor.*
 

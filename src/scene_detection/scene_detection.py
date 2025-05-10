@@ -18,16 +18,27 @@ from typing import List, Dict, Any
 import psutil
 import platform
 from src.utils.profiling import profile_stage
+import time
 
 def _extract_frame_worker(args):
-    video_path, idx = args
+    video_path, idx, use_cuda = args
     cap = cv2.VideoCapture(video_path)
     cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
     ret, frame = cap.read()
     cap.release()
     if not ret:
         return None
-    frame_resized = cv2.resize(frame, (48, 27))
+    if use_cuda:
+        try:
+            gpu_frame = cv2.cuda_GpuMat()
+            gpu_frame.upload(frame)
+            gpu_resized = cv2.cuda.resize(gpu_frame, (48, 27), interpolation=cv2.INTER_LINEAR)
+            frame_resized = gpu_resized.download()
+        except Exception as e:
+            print(f"[SceneDetection][WARNING] CUDA resize failed, falling back to CPU: {e}")
+            frame_resized = cv2.resize(frame, (48, 27))
+    else:
+        frame_resized = cv2.resize(frame, (48, 27))
     return frame_resized
 
 def _get_fps_and_nframes(video_path: str):
@@ -63,15 +74,27 @@ def detect_scenes_transnetv2_pytorch(video_path: str, output_dir: str, batch_siz
         print(f"[TransNetV2-PyTorch] No frames found in {video_path}.")
         return []
 
-    # Parallel, thread-safe frame extraction
+    # Check for OpenCV CUDA
+    use_cuda = False
+    try:
+        if cv2.cuda.getCudaEnabledDeviceCount() > 0:
+            use_cuda = True
+            print("[SceneDetection] Using OpenCV CUDA for resizing.")
+    except Exception:
+        use_cuda = False
+
+    # Parallel, thread-safe frame extraction with timing
+    t0 = time.time()
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        frames = list(executor.map(_extract_frame_worker, [(video_path, idx) for idx in range(n_frames)]))
+        frames = list(executor.map(_extract_frame_worker, [(video_path, idx, use_cuda) for idx in range(n_frames)]))
+    t1 = time.time()
     frames = [f for f in frames if f is not None]
     frames = np.array(frames, dtype=np.uint8)
     n_frames = len(frames)
     if n_frames == 0:
         print(f"[TransNetV2-PyTorch] No frames extracted from {video_path}.")
         return []
+    print(f"[SceneDetection][Profiling] Frame extraction: {n_frames} frames in {t1-t0:.2f} sec (FPS: {n_frames/(t1-t0):.2f})")
 
     # Load model and weights
     model = TransNetV2()
@@ -80,7 +103,8 @@ def detect_scenes_transnetv2_pytorch(video_path: str, output_dir: str, batch_siz
     model.to(device)
     model.eval()
 
-    # Batched inference
+    # Batched inference with timing
+    t2 = time.time()
     all_preds = []
     with torch.no_grad():
         for i in range(0, n_frames, batch_size):
@@ -89,7 +113,9 @@ def detect_scenes_transnetv2_pytorch(video_path: str, output_dir: str, batch_siz
             single_frame_pred, _ = model(batch_tensor)
             preds = torch.sigmoid(single_frame_pred).cpu().numpy()[0, :, 0]
             all_preds.append(preds)
+    t3 = time.time()
     predictions = np.concatenate(all_preds)
+    print(f"[SceneDetection][Profiling] Model inference: {n_frames} frames in {t3-t2:.2f} sec (FPS: {n_frames/(t3-t2):.2f}), batch size: {batch_size}")
 
     # Post-process predictions to scene boundaries
     scenes = predictions_to_scenes(predictions, threshold=threshold, min_scene_len=min_scene_len)
