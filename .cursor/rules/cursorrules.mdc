@@ -55,4 +55,64 @@ alwaysApply: false
 - Project rules must be reviewed and updated at the start of each major phase.
 - All rule changes must be documented and approved by project stakeholders.
 
+## 9. Docker Build Data Cleanup & Disk Management
+- To ensure disk space is carefully managed, systematically remove data from failed, unnecessary, or outdated Docker builds, images, containers, and caches.
+- Follow these CLI steps for safe, reproducible cleanup:
+
+### Step-by-Step Instructions
+
+#### 1. Remove Stopped Containers
+```
+docker container prune -f
+```
+_Removes all stopped containers._
+
+#### 2. Remove Unused Images (Dangling and Unreferenced)
+```
+docker image prune -a -f
+```
+_Removes all images not referenced by any container (including failed builds)._
+
+#### 3. Remove Unused Volumes
+```
+docker volume prune -f
+```
+_Removes all unused volumes (often left by failed builds)._
+
+#### 4. Remove Unused Networks
+```
+docker network prune -f
+```
+_Removes all unused networks._
+
+#### 5. Remove Build Cache
+```
+docker builder prune -a -f
+```
+_Removes all unused build cache data (can be substantial after many builds)._
+
+#### 6. Full System Prune (Optional, Most Aggressive)
+```
+docker system prune -a --volumes -f
+```
+_Removes all unused data: containers, images, volumes, and networks. Use with caution!_
+
+### Best Practices
+- Run these commands regularly (e.g., after CI/CD runs, or when disk space is low).
+- Always review what will be deleted (use `docker system df` to see disk usage).
+- Automate cleanup in CI/CD pipelines if possible, but never on production systems without review.
+- Document all cleanup actions in project logs for reproducibility and auditability.
+
+### Troubleshooting
+- If disk space is not reclaimed, ensure Docker Desktop/Engine is restarted.
+- If using WSL2, compact the `.vhdx` file after cleanup for actual disk space recovery (see separate instructions).
+
+### Scientific Rigor
+- All cleanup steps must be logged and version-controlled if run as part of a pipeline.
+- No manual deletion of files outside Docker CLI unless explicitly documented and justified.
+
+### Reference
+- [Docker Disk Usage Documentation](https://docs.docker.com/config/pruning/)
+- [Docker System Prune](https://docs.docker.com/engine/reference/commandline/system_prune/)
+
 # End of Cursor Project Rules

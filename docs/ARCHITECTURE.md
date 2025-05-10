@@ -1,6 +1,6 @@
 /*
 📌 Purpose – Defines the modular, reproducible system architecture for the Video Timeline Analyzer, with a focus on variable-granularity metadata alignment and backend-first development.
-🔄 Latest Changes – Clarified Windows-native, PyTorch-only backend; removed references to TensorFlow, PySceneDetect, and WSL2/Linux. Emphasized modular, pipeline-oriented backend and hardware-agnostic model loading for Windows.
+🔄 Latest Changes – Clarified Windows-native, PyTorch-only backend; removed references to TensorFlow, PySceneDetect, and WSL2/Linux. Emphasized modular, pipeline-oriented backend and hardware-agnostic model loading for Windows. Updated to reflect hardware constraints: Docker integration with large frameworks (PyTorch, TensorFlow) is currently infeasible due to disk space. Added recommendations for lightweight CUDA alternatives (CuPy, Numba) and rationale for minimizing dependencies while retaining GPU acceleration.
 ⚙️ Key Logic – All pipeline outputs are parsed and aligned into a variable-granularity DataFrame, which is the canonical source for Qdrant ingestion and downstream analysis. Scene detection is modular: TransNet V2 (PyTorch-only, hardware-agnostic, Windows-native).
 📂 Expected File Path – docs/ARCHITECTURE.md
 🧠 Reasoning – Ensures maintainability, extensibility, and reproducibility for scientific video analysis by making the DataFrame the central, queryable structure and prioritizing backend development for Windows.
@@ -50,6 +50,34 @@ The Video Timeline Analyzer is a modular, pipeline-oriented backend application 
                             |   Qdrant Vector Database      |
                             +-------------------------------+
 ```
+
+## 3a. Containerization, Technology Choices, and Disk Management
+
+### Rationale for Docker
+- **Reproducibility:** Docker ensures that all contributors and deployments use the exact same environment, eliminating "works on my machine" issues.
+- **GPU Acceleration:** The Dockerfile is based on NVIDIA CUDA images, enabling seamless GPU access for scientific workloads.
+- **Dependency Management:** All dependencies (CUDA, cuDNN, PyTorch, OpenCV, etc.) are installed in a controlled, isolated environment, reducing conflicts and setup time.
+
+### Exclusion of TensorFlow and WSL2
+- **TensorFlow:** Initially considered, but excluded due to its large disk footprint, additional complexity, and lack of necessity for the current PyTorch-based pipeline. All deep learning modules are now PyTorch-only, simplifying the stack and improving maintainability.
+- **WSL2:** Early development under WSL2 led to significant disk space consumption and operational complexity. The project is now fully Windows-native, with Docker providing all necessary isolation and compatibility.
+
+### Docker Image Size and Disk Space Management
+- **Image Size:** The initial GPU-accelerated Docker image exceeded 35GB, primarily due to large dependencies and lack of cleanup. This prompted the adoption of aggressive pruning and cleanup commands (e.g., `apt-get clean`, removing pip/apt caches) in the Dockerfile.
+- **Disk Management:** Lessons from WSL2 and Docker image bloat have led to the adoption of best practices for disk and image management, now documented in DEVELOPMENT_SETUP.md and enforced by Cursor Project Rules. Regular use of Docker system prune and careful volume management are recommended.
+- **Hardware Constraints & Alternatives:** If disk space is a limiting factor, consider omitting large frameworks (PyTorch, TensorFlow) from your Docker builds and using lightweight CUDA libraries (CuPy, Numba) where possible. This can significantly reduce image size and make Docker integration more feasible on constrained hardware. Reassess project requirements to determine if full deep learning frameworks are necessary for your use case.
+
+### Current State
+- **PyTorch-Only, Windows-Native, Docker-Based:** The backend is now fully PyTorch-based, running natively on Windows via Docker containers. All contributors are encouraged to use the provided Dockerfile and follow the Cursor Project Rules for reproducibility and efficiency.
+- **Best Practices Enforced:** All build and operational processes include explicit pruning and cleanup steps. Contributors should reference DEVELOPMENT_SETUP.md, ROADMAP.md, and the Cursor Project Rules for up-to-date operational guidance.
+
+### Lessons Learned
+- Avoid unnecessary dependencies and layers in the Dockerfile.
+- Always include cleanup steps after installing packages.
+- Monitor disk usage regularly, especially when using WSL2 or large Docker images.
+- Prefer a unified, minimal stack (PyTorch-only) for maintainability and efficiency.
+
+For further details, see [DEVELOPMENT_SETUP.md](DEVELOPMENT_SETUP.md), [ROADMAP.md](ROADMAP.md), and the Cursor Project Rules.
 
 ---
 

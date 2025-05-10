@@ -1,6 +1,6 @@
 /*
 📌 Purpose – This document provides step-by-step instructions to set up the development environment for the Video Timeline Analyzer project, ensuring consistency and reproducibility.
-🔄 Latest Changes – Updated for Windows-native, PyTorch-only workflow; removed WSL2, Linux, macOS, TensorFlow, and PySceneDetect references.
+🔄 Latest Changes – Updated for Windows-native, PyTorch-only workflow; removed WSL2, Linux, macOS, TensorFlow, and PySceneDetect references. Updated to reflect hardware constraints: Docker integration with large frameworks (PyTorch, TensorFlow) is currently infeasible due to disk space. Added recommendations for lightweight CUDA alternatives (CuPy, Numba) and rationale for minimizing dependencies while retaining GPU acceleration.
 ⚙️ Key Logic – Contains detailed environment setup commands and testing instructions for Windows-native development.
 📂 Expected File Path – docs/DEVELOPMENT.md
 🧠 Reasoning – Facilitates a clean and reproducible development setup following best practices recommended in the roadmap for Windows.
@@ -77,4 +77,12 @@ if torch.cuda.is_available():
     model.cuda()
 ```
 
-See the [Roadmap](ROADMAP.md) for details and troubleshooting. 
+See the [Roadmap](ROADMAP.md) for details and troubleshooting.
+
+## Project Diary: Pipeline Understanding & Compute Assessment
+
+> **Note (2024-06):**
+> Due to hardware constraints, Docker integration with large frameworks (PyTorch, TensorFlow) is not currently feasible. The project aims to minimize dependencies while retaining GPU acceleration. Consider using lightweight CUDA alternatives such as CuPy or Numba for GPU-accelerated tasks that do not require full deep learning frameworks. This approach reduces disk usage and increases portability, but may require more manual management of GPU operations. Docker support may be revisited if hardware resources improve.
+
+> **Note (2024-06):**
+> Significant time was spent understanding how to create and configure the full pipeline, especially regarding GPU acceleration, Docker image size, and local compute requirements. Assessing whether local hardware was sufficient to run the project to completion required multiple iterations and careful review of both documentation and system resources. These challenges are now documented in DEVELOPMENT_SETUP.md and the Cursor Project Rules to help future contributors avoid similar pitfalls. 
