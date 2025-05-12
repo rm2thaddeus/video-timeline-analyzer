@@ -1,0 +1,76 @@
+# 📌 Purpose – Base Docker Compose configuration for production-like deployment of Video Timeline Analyzer.
+# 🔄 Latest Changes – Updated command to use proper entrypoint commands instead of placeholder.
+# ⚙️ Key Logic – 
+#    - 'app' service: Builds from local Dockerfile, mounts volumes for models and data, enables GPU access.
+#    - 'qdrant' service: Uses official Qdrant image, mounts volume for persistent storage.
+# 📂 Expected File Path – ./docker-compose.yml
+# 🧠 Reasoning – Provides a reproducible environment for running the application and its database, separating concerns and managing data persistence.
+
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: final
+      args:
+        # These can be overridden at build time if needed
+        CUDA_VERSION: 11.8.0
+        CUDNN_VERSION: 8
+        PYTHON_VERSION: 3.9
+        UBUNTU_VERSION: 22.04
+    container_name: video_timeline_app
+    runtime: nvidia # To enable GPU access for NVIDIA GPUs
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - HF_HOME=/app/.cache/huggingface # Consistent with Dockerfile
+      - XDG_CACHE_HOME=/app/.cache      # Consistent with Dockerfile
+      - PYTHONUNBUFFERED=1
+      # Add other necessary environment variables here
+      # e.g., - DATABASE_URL=qdrant:6333
+    volumes:
+      - ./data:/app/data  # For input videos and output data/results
+      - ./models/transnetv2_weights:/app/models/transnetv2_weights # For TransNetV2 weights
+      - hf_cache:/app/.cache/huggingface # For Hugging Face model cache
+      # If src/scene_detection/download_transnetv2_weights.py downloads to a specific path inside /app, adjust the volume mount accordingly.
+      # Example: If it downloads to /app/transnetv2-pytorch-weights.pth
+      # - ./models/transnetv2_weights/transnetv2-pytorch-weights.pth:/app/transnetv2-pytorch-weights.pth 
+      # The Dockerfile copies src and scripts, so code changes require image rebuild unless overridden by dev compose file.
+    depends_on:
+      qdrant:
+        condition: service_healthy # Wait for Qdrant to be healthy
+    # networks:
+    #   - app_network
+    # Use the entrypoint script with proper arguments
+    command: dev # This will run in development mode using the entrypoint.sh logic
+
+  qdrant:
+    image: qdrant/qdrant:v1.7.4 # Use a specific stable version
+    container_name: qdrant_db
+    ports:
+      - "6333:6333" # gRPC
+      - "6334:6334" # HTTP API
+    volumes:
+      - qdrant_storage:/qdrant/storage # Persistent storage for Qdrant data
+    # networks:
+    #   - app_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6334/collections"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  qdrant_storage:
+    driver: local
+  hf_cache:
+    driver: local
+  # transnet_weights: # Not strictly needed as a named volume if mounting from host like ./models/transnetv2_weights
+  #   driver: local
+
+# networks:
+#   app_network:
+#     driver: bridge
+ 

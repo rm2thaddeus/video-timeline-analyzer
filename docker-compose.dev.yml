@@ -1,0 +1,50 @@
+# 📌 Purpose – Development-specific Docker Compose overrides for Video Timeline Analyzer.
+# 🔄 Latest Changes – Updated to use proper entrypoint command for development mode.
+# ⚙️ Key Logic – 
+#    - Extends the base 'app' service from docker-compose.yml.
+#    - Mounts local 'src/' and 'scripts/' directories into the container for live code changes.
+#    - Can be used to set development-specific environment variables or commands.
+# 📂 Expected File Path – ./docker-compose.dev.yml
+# 🧠 Reasoning – Facilitates a faster development cycle by allowing code changes without rebuilding the Docker image.
+
+version: '3.8'
+
+services:
+  app:
+    # No need to redefine build context if it's the same as the base docker-compose.yml
+    # The Dockerfile used will be the same unless a different target is specified or a separate dev Dockerfile is created.
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile # Or Dockerfile.dev if you have one
+    #   target: development # If your Dockerfile has a specific development stage
+
+    volumes:
+      # Override or add to existing volumes
+      - ./src:/app/src # Mount local src directory for live code reloading
+      - ./scripts:/app/scripts # Mount local scripts directory
+      # Ensure data and model volumes from the base compose file are still appropriate or adjust as needed.
+      # For example, if you want to ensure they are definitely present:
+      - ./data:/app/data
+      - ./models/transnetv2_weights:/app/models/transnetv2_weights
+      - hf_cache:/app/.cache/huggingface
+      # Add entrypoint script for hot reloading
+      - ./entrypoint.sh:/app/entrypoint.sh
+
+    # Use the dev mode from entrypoint.sh
+    command: dev
+
+    # Development specific environment variables
+    environment:
+      - FLASK_ENV=development
+      - DEBUG=True
+
+    # Development port mappings
+    ports:
+      - "8000:8000"  # Adjust based on your app's needs
+
+  # qdrant service typically doesn't need overrides for development, 
+  # unless you want to use a different version or configuration.
+  # If no changes, it will use the definition from docker-compose.yml
+
+# Volumes defined in docker-compose.yml will be available unless redefined here.
+# networks defined in docker-compose.yml will be available unless redefined here. 
