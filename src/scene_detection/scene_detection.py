@@ -19,13 +19,25 @@ import psutil
 import platform
 from src.utils.profiling import profile_stage
 import time
+from contextlib import redirect_stderr
+
+# Suppress OpenCV/FFmpeg warnings by setting logging level to ERROR
+try:
+    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+except Exception:
+    try:
+        cv2.setLogLevel(0)
+    except Exception:
+        pass
 
 def _extract_frame_worker(args):
     video_path, idx, use_cuda = args
-    cap = cv2.VideoCapture(video_path)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-    ret, frame = cap.read()
-    cap.release()
+    # Suppress FFmpeg warnings during frame capture
+    with open(os.devnull, 'w') as devnull, redirect_stderr(devnull):
+        cap = cv2.VideoCapture(video_path)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ret, frame = cap.read()
+        cap.release()
     if not ret:
         return None
     if use_cuda:
@@ -42,7 +54,9 @@ def _extract_frame_worker(args):
     return frame_resized
 
 def _get_fps_and_nframes(video_path: str):
-    cap = cv2.VideoCapture(video_path)
+    # Suppress FFmpeg warnings when opening video
+    with open(os.devnull, 'w') as devnull, redirect_stderr(devnull):
+        cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {video_path}")
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -51,6 +65,7 @@ def _get_fps_and_nframes(video_path: str):
     return fps, n_frames
 
 def detect_scenes_transnetv2_pytorch(video_path: str, output_dir: str, batch_size: int = 100, threshold: float = 0.5, min_scene_len: int = 15, num_workers: int = 4, **kwargs) -> List[Dict[str, Any]]:
+    print(f"[SceneDetection] Starting threaded detection\n  video_path: {video_path}\n  output_dir: {output_dir}\n  batch_size: {batch_size}, threshold: {threshold}, min_scene_len: {min_scene_len}, num_workers: {num_workers}")
     sys.path.append(os.path.join(os.path.dirname(__file__), "transnetv2_repo", "inference-pytorch"))
     from transnetv2_pytorch import TransNetV2
 
@@ -194,16 +209,17 @@ def detect_scenes_all_in_memory(video_path: str, output_dir: str, batch_size: in
     model.to(device)
     model.eval()
 
-    # Load all frames into memory
-    cap = cv2.VideoCapture(video_path)
-    frames = []
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        frame_resized = cv2.resize(frame, (48, 27))
-        frames.append(frame_resized)
-    cap.release()
+    # Suppress FFmpeg warnings during bulk frame loading
+    with open(os.devnull, 'w') as devnull, redirect_stderr(devnull):
+        cap = cv2.VideoCapture(video_path)
+        frames = []
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame_resized = cv2.resize(frame, (48, 27))
+            frames.append(frame_resized)
+        cap.release()
     frames = np.array(frames, dtype=np.uint8)
     print(f"[AllInMemory] Loaded {len(frames)} frames into memory. RAM usage: {psutil.virtual_memory().percent}%")
 
